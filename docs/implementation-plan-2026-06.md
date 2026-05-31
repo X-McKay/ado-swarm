@@ -2,7 +2,7 @@
 
 **Date:** 2026-05-31
 **Author:** engineering review
-**Inputs:** `docs/codebase-review-2026-05.md` (the current-state review), plus current-API research on the **Strands Agents SDK `1.41.0`**, the **Temporal Python SDK `temporalio 1.27.2`**, and the *harness-engineering* body of practice (`ai-boost/awesome-harness-engineering`).
+**Inputs:** `docs/codebase-review-2026-05.md` (the current-state review), plus current-API research on the **Strands Agents SDK `1.41.0`**, the **Temporal Python SDK `temporalio 1.27.2`**, and the *harness-engineering* body of practice (`ai-boost/awesome-harness-engineering`); the **Willison agent/tool/skill vocabulary** (§2.0, `docs/concepts/agents-tools-skills.md`); and a reviewed **Workflow + Swarm architecture suggestion** (folded in as the §8-D1 resolution and Phase 1.5).
 **Status:** Draft for review & discussion. Recommendations are made throughout; genuine forks are collected in **§8 Open decisions**.
 
 ---
@@ -37,6 +37,17 @@ This rule is the lens for the whole plan: Phase 1 turns the deterministic casefi
 4. **Verification is a governor, not advice.** Agent output is accepted only when it passes deterministic checks (schema validity, casefile invariants, and — for remediation — tests/linters in a sandbox). The model never self-certifies. This is the harness "hard environmental signal." (Verification checks are harness steps/tools, not agents — per §2.0.)
 5. **Determinism stays in the workflow; all I/O and model calls stay in activities.** No wall-clock/uuid/model calls in workflow code (fixes review §5).
 6. **Everything is eval-gated.** Golden casefiles + `pass^k`, deterministic assertions before any LLM-judge, the `fake` model keeps CI hermetic, a real local model (Ollama) runs in a nightly quality gate.
+
+### 2.2 Stage execution modes — pick the right one per pipeline stage
+A pipeline **stage** is not the same thing as an **agent**. Each stage runs in exactly one of three modes; the choice is made per stage and can change as a stage matures:
+
+| Mode | What it is | Uses a model? | When |
+|---|---|---|---|
+| **Tool / harness step** | A bare deterministic tool call (or verification check) inside the activity — **no agent** | No | The work is fully deterministic (e.g. compute a risk threshold, run schema/test checks). Per §2.0 this is *not* a "deterministic agent" — it's a tool, and we never call it an agent. |
+| **Single agent** | One Strands `Agent` — tools in a loop | Yes | The stage needs a model to decide/plan/judge over messy inputs (e.g. `repo_analyst` choosing what evidence to gather). |
+| **Bounded swarm cell** | Multiple agents + a judge inside one activity, returning one typed result | Yes (several) | Multi-perspective critique measurably raises quality (e.g. `security_reviewer` adjudication — Phase 1.5). Only adopt where evals prove it beats single-agent. |
+
+This reframes the common "deterministic / model-assisted / swarm" mode taxonomy so it stays consistent with the §2.0 rule: a "deterministic stage" is a **tool step with no agent**, never a deterministic agent. Default to the simplest mode that meets the quality bar; escalate to a swarm cell only when an eval justifies the added cost (a swarm cell is ~4× the model calls of a single agent).
 
 ---
 
@@ -75,6 +86,7 @@ This rule is the lens for the whole plan: Phase 1 turns the deterministic casefi
 | Plan/DAG, scheduling, retries, snapshot | Temporal workflow | `SupervisorWorkflow` (one plan representation — collapse the three from review §3.1) |
 | Human approval gates | Temporal **Update + validator** | `approve_task`/`reject_task` (not signals — §7.6) |
 | Model reasoning, tool calls, skill activation | Strands `Agent` in an activity | `run_agent` activity |
+| Multi-perspective adjudication (where evals justify it) | **Bounded swarm cell** inside one activity | Strands `Swarm`/`Graph` → one typed result (Phase 1.5, §8-D1) |
 | Tool authorization | Strands `BeforeToolCallEvent` hook | `ToolPolicyHook` → PEP/PDP |
 | Typed casefile sections | Strands structured output | `agent.structured_output(Section, prompt)` |
 | Cross-activity agent memory | Strands snapshots | `take_snapshot`/`load_snapshot` |
@@ -130,6 +142,26 @@ Pick the slice **`ticket_analyst → repo_analyst → risk_auditor`** (covers no
 6. **Golden evals that can fail.** 8–12 golden casefiles per slice agent with expected dispositions; deterministic assertions; `pass^k` (k≥3) on the **real** model (Ollama) in a nightly job, `fake` in CI. Wire the existing `pass_k` plumbing (`cli/main.py`).
 
 **Acceptance:** with `MODEL_PROVIDER=ollama`, every slice agent makes ≥1 real model call **and** ≥1 tool call (no model-less agents; the former `normalization.py` now runs as the `normalize_finding` tool); a denied tool is provably blocked by the hook (a test asserts `cancel_tool` fired); skills show up in `activated_skills`; golden evals pass `pass^3` on the local model and are deterministic on `fake`. Catalog tools have isolated unit tests.
+
+### Phase 1.5 — Bounded adjudication swarm in `security_reviewer` (resolves §8-D1) (≈1 wk)
+*Goal: introduce one **bounded swarm cell** where multi-perspective critique genuinely raises decision quality — only after the single-agent loop (M1) is proven reliable. This is the §8-D1 resolution: yes to intra-stage multi-agent, starting here and nowhere else yet.*
+
+`security_reviewer` is the right (and only initial) candidate: adjudication benefits from independent perspectives. Inside the single `security_reviewer` activity, run a Strands `Swarm`/`GraphBuilder` cell:
+- A stale-finding reviewer, a false-positive reviewer, and a duplicate/already-fixed reviewer each argue their case (each a model agent with the relevant skill + read tools).
+- An **adjudication judge** reconciles them into one **strict-schema** `FindingAdjudication` (typed, not free-form debate).
+
+The cell stays a **bounded swarm cell** — it is harness machinery inside one activity, governed by:
+- **Budget cap** (`BudgetHook`): hard ceiling on model/tool calls per finding (an ensemble+judge is ~4× a single agent — this is the dominant cost line, so the cap is mandatory).
+- **Timeout** (cell-level + Temporal `node_timeout`/`execution_timeout` on the Strands `Swarm`).
+- **Tool policy**: every sub-agent's tools flow through the same `ToolPolicyHook`.
+- **Strict judge output schema**: the judge emits a contract-backed `FindingAdjudication` via `structured_output`; reviewers hand off typed positions, not prose (mitigates the "multi-agent fails without explicit coordination" risk from the harness research).
+- **Transcript as artifact**: the swarm transcript/summary is stored as a `RunArtifact` for audit; the Temporal workflow still sees exactly one `security_reviewer` task returning one typed result — workflow history stays understandable and deterministic.
+
+**Design note — retry/idempotency (call this out now so we don't trip later):** a swarm cell inside an activity is non-idempotent and *expensive to retry* — a transient failure near the judge re-runs all reviewers. Mitigate by (a) checkpointing reviewer results within the cell (resume the judge without re-debating), (b) a generous `start_to_close_timeout` with a conservative retry policy on this activity, and (c) caching per-finding adjudication keyed by finding fingerprint so a Temporal retry short-circuits completed reviewers.
+
+**Implementation choice (kept simple initially):** run the reviewers *inside one activity* via Strands `Swarm` (shared context, simple handoffs) rather than one Temporal activity per reviewer. We trade per-reviewer durability/visibility for simplicity; revisit only if a reviewer needs independent retry/approval (the child-workflow-per-reviewer alternative is noted in §8-D1).
+
+**Acceptance:** on an ambiguous golden finding, the swarm cell produces a `FindingAdjudication` that beats the single-agent baseline on the adjudication golden set (measured by `pass^k` agreement with expected disposition); a budget breach halts the cell with a typed error; the transcript is persisted as an artifact; Temporal still sees one task and replays deterministically. If the swarm does **not** beat the single-agent baseline on evals, we keep `security_reviewer` single-agent (the eval is the decision gate).
 
 ### Phase 2 — Temporal correctness & real approvals (≈1 wk)
 *Goal: make the governance layer real (review §2.4, §5).*
@@ -296,7 +328,7 @@ async with await WorkflowEnvironment.start_time_skipping() as env:
 
 ## 8. Open decisions (for discussion)
 
-- **D1 — Multi-agent ownership.** *Recommended:* Temporal owns cross-agent orchestration; Strands agents run one-per-activity. Alternative: use Strands `Swarm`/`Graph` for the whole pipeline inside fewer activities (simpler agent handoffs, but cedes durability/visibility/approval granularity to Strands). *Recommendation: Temporal-owned.*
+- **D1 — Multi-agent ownership.** *Decided:* **Temporal owns cross-agent orchestration; Strands agents run one-per-activity** — *and* we adopt **bounded swarm cells inside a single activity** where evals prove they raise quality, starting with `security_reviewer` adjudication (**Phase 1.5**, §5). We do **not** hand the whole pipeline to a Strands `Swarm` (that would cede durability/visibility/approval granularity to Strands). The cell stays inside one activity, governed by budget/timeout/tool-policy/strict-judge-schema, returns one typed result, and persists its transcript as an artifact — Temporal sees one task. *Open sub-question:* if a sub-reviewer ever needs independent retry/approval, promote that cell from an in-activity Strands `Swarm` to one Temporal activity/child-workflow per reviewer (heavier, more durable). Default: in-activity swarm.
 - **D2 — Agent vs tool demotion (the §2.0 rule applied per unit).** *Decided:* **all agents use a model** (no deterministic agents). The remaining open question is which of today's 9 "agents" are genuine tools-in-a-loop agents vs. should be **demoted to tools or harness steps**. *Recommended:* keep as model-driven agents — `ticket_analyst` (normalize messy/ambiguous issues), `repo_analyst` (decide what evidence to gather, call repo tools), `security_reviewer` (adjudicate stale/dup/false-positive), `risk_auditor` (score risk/eligibility), `solutions_architect` (plan), `test_engineer` (validation strategy). *Demote/justify:* `qa_lead` (intake coordination — may be a workflow/harness step, not an agent), `data_analyst` (analytics — agent only if it genuinely reasons over patterns; otherwise a reporting tool/query), `software_engineer` (out of scope this plan — §8-D7). Confirm the keep/demote list per agent.
 - **D3 — Local model target.** Ollama model for the nightly quality gate (e.g. a small Llama/Qwen). Tradeoff: bigger = better evals, slower CI. *Recommended:* a small instruct model for `pass^k`, Bedrock for staging.
 - **D4 — Memory backend.** Graphiti+Neo4j (already scaffolded) vs. add mem0/Zep for cross-session recall. *Recommended:* finish Graphiti first (it's in the plan/ADR), revisit mem0 only if recall quality is insufficient.
@@ -312,6 +344,7 @@ async with await WorkflowEnvironment.start_time_skipping() as env:
 |---|---|---|
 | **M0 Infra** | 0 | CI green; `tests/workflow/` proves mission lifecycle (run/pause/approve/cancel/replay) with mocked activities; agent tests need no services. |
 | **M1 Cognitive slice** | 1 | `ticket_analyst→repo_analyst→risk_auditor` reason via Ollama; a denied tool is provably blocked; skills appear in `activated_skills`; golden evals `pass^3` on local model, deterministic on `fake`. |
+| **M1.5 Swarm cell** | 1.5 | `security_reviewer` adjudication swarm beats the single-agent baseline on the adjudication golden set; budget breach halts the cell; transcript persisted as artifact; Temporal still sees one task and replays deterministically. *If it doesn't beat the baseline, stay single-agent.* |
 | **M2 Governance** | 2 | Approval Update gates a real tool; rejection refused by validator; policy-denied tool → non-retryable `ApplicationError`; one plan/scheduler representation. |
 | **M3 DX/dedup** | 3 | New agent = 1 metadata + 1 `enrich()` + 1 fixture; `ado-swarm agent run` works against a real model; `skills-validate` catches drift; ≥500 LOC removed. |
 | **M4 Production** | 4 | Pooled DB + leak-free providers; `budget_events` enforced; OTel trace operator→model; Graphiti recall used in adjudication. |

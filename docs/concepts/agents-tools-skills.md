@@ -73,6 +73,18 @@ Same problem, three roles: the deterministic core is a tool, the reasoning is th
 
 ---
 
+## Stages vs. agents: a deterministic stage is not a "deterministic agent"
+
+A pipeline **stage** (e.g. "normalize the ticket", "adjudicate the finding") is not the same as an **agent**. A stage runs in one of three modes, and only two of them involve agents:
+
+| Stage mode | What runs | Agent? |
+|---|---|---|
+| **Tool / harness step** | A bare deterministic tool call or verification check in the activity | **No** — it's a tool, never call it an agent |
+| **Single agent** | One Strands `Agent` (tools in a loop) | Yes |
+| **Bounded swarm cell** | Several agents + a judge inside one activity, returning one typed result | Yes (several) |
+
+This is the precise way to talk about "deterministic stages" without violating the core rule: if a stage is fully deterministic, it is a **tool step with no agent** — we do not describe it as a "deterministic agent." Escalate from a tool step to a single agent only when a model is needed to decide; escalate from a single agent to a swarm cell only when an eval proves the extra cost (a swarm cell is ~4× the model calls) buys better decisions. See `docs/implementation-plan-2026-06.md` §2.2 and Phase 1.5.
+
 ## How this maps to the stack
 
 | Concept | Willison | In `ado-swarm` | Enforcement |
