@@ -1,7 +1,7 @@
 ---
 name: code-location-verification
-description: Verify whether referenced files, lines, manifests, symbols, or paths still exist.
-allowed-tools: provider_get_issue provider_get_repo_metadata casefile_read blackboard_append graphiti_search policy_check_action
+description: Use this skill when checking whether a finding's cited file, line, or manifest still exists at the ref.
+allowed-tools: verify_file_location resolve_repository graphiti_search
 metadata:
   pack: repository-investigation
   maturity: base
@@ -10,20 +10,51 @@ metadata:
 
 ## Objective
 
-Verify whether referenced files, lines, manifests, symbols, or paths still exist.
+Determine whether the code location a finding points at actually exists at the resolved ref, and
+gather the evidence that proves it. This is the ground-truth check that decides whether a finding
+is still live, has moved, or is `stale`. You verify presence; you do not judge exploitability.
 
-## Required inputs
+## When to use
 
-A canonical casefile or task context, provider metadata, available repository evidence, prior audit events, and applicable policy constraints.
+- A repository and ref are already resolved (see `repository-resolution`) and the finding cites a
+  `file_path` (and optionally `line`, a manifest, or a symbol).
+- You need to set `RepositoryEvidence.file_exists`.
+
+## Inputs
+
+- `NormalizedFinding.file_path` — the path to confirm at the ref.
+- `NormalizedFinding.line` — secondary; a path can exist while the line drifted.
+- `NormalizedFinding.package_name` — for SCA, verify the manifest entry, not a source line.
+- `RepositoryEvidence.repository` / `.ref` — the resolved context to check against.
 
 ## Procedure
 
-1. Confirm that the task objective matches this skill and identify missing evidence.
-2. Work only from canonical contracts and explicitly referenced evidence.
-3. Request only tools allowed by the active runtime policy; `allowed-tools` is descriptive, not enforcement.
-4. Produce structured, audit-friendly output with confidence, rationale, evidence references, and stop conditions.
-5. Escalate rather than guess when evidence is missing, ambiguous, sensitive, or outside the safe change boundary.
+1. Confirm a repo/ref is resolved; if not, call `resolve_repository` first.
+2. Call `verify_file_location` with the repository, ref, and `file_path`. Capture its result as
+   the authoritative existence signal.
+3. Interpret the result into `file_exists`: True (path present at ref), False (definitively absent),
+   or None (could not determine — access/timeout/ambiguity). Never coerce None into False.
+4. For SCA findings, verify the dependency manifest contains the `package_name`, not a code line —
+   the file_path is often `package.json`/`requirements.txt`/`*.csproj`.
+5. Append concrete proof to `RepositoryEvidence.evidence`: the path checked, the ref, and what was
+   found (e.g. "path present at <ref>", "file deleted between scan and <ref>", "manifest no longer lists pkg").
+6. Use `graphiti_search` to compare against prior verifications of the same location.
+
+## Decision criteria
+
+- `file_exists=True` => finding location is live; proceed to severity/remediation downstream.
+- `file_exists=False` => strong signal the finding is `stale` (fixed/removed); cite the absence.
+- `file_exists=None` => insufficient evidence; do NOT assert stale. This is an evidence gap.
+- A present file with a moved line is still `file_exists=True`; line drift alone is not staleness.
+- Evidence is "sufficient" only when it names the exact path AND the exact ref it was checked at.
 
 ## Output expectations
 
-Return concise findings suitable for inclusion in `AgentResult`, casefile sections, and task audit events. Include activated skill name `code-location-verification` in audit metadata.
+Sets `RepositoryEvidence.file_exists` and adds verification details to `RepositoryEvidence.evidence`
+(repo_analyst section).
+
+## Escalation
+
+If verification returns None on a high/critical finding, or the path resolves ambiguously
+(multiple matches, symlink, generated file), record the gap and mark `needs_human` rather than
+guessing existence.
