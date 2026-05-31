@@ -33,7 +33,7 @@ just new-agent <id> / just new-tool <name> <area> / just new-skill <name>
 MODEL_PROVIDER=ollama just eval-agents                # evals against a real local model
 ```
 
-`uv` runs everything; `mise` pins tools. CI (`.github/workflows/ci.yml`) mirrors `just check` plus `eval-agents` on the `fake` profile.
+`uv` runs everything; `mise` pins tools. CI mirrors `just check` plus `eval-agents` on the `fake` profile; the workflow is kept as a template at `docs/ci/github-actions-ci.yml` because the bot can't push `.github/workflows/` — copy it there to enable CI.
 
 ## Layout
 

@@ -49,6 +49,28 @@ skills-validate:
 up-ollama:
   docker compose -f docker-compose.yml -f docker-compose.ollama.yml up -d --build
 
+# --- Isolated agent/skill dev harness & scaffolders ---
+agent-run agent *ARGS:
+  uv run ado-swarm agents run {{agent}} {{ARGS}}
+
+skills-list:
+  uv run ado-swarm skills list
+
+skills-show name:
+  uv run ado-swarm skills show {{name}}
+
+skills-lint:
+  uv run ado-swarm skills lint
+
+new-agent id section="TODO_section" tool="TODO_tool":
+  uv run ado-swarm scaffold agent {{id}} --section-field {{section}} --tool {{tool}}
+
+new-tool name area:
+  uv run ado-swarm scaffold tool {{name}} {{area}}
+
+new-skill name description="TODO: when to use this skill":
+  uv run ado-swarm scaffold skill {{name}} --description "{{description}}"
+
 up:
   docker compose up -d --build
 
