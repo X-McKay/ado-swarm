@@ -1,6 +1,6 @@
 # Runtime Skill Catalog
 
-The base runtime now includes the full initial security-remediation skill catalog. Skills are organized by pack so agents can load phase-relevant procedures without a monolithic prompt.
+The base runtime includes the full initial security-remediation skill catalog. Skills are **load-bearing**: each agent's `SKILL.md` files are bound to its Strands `Agent` via the `AgentSkills` plugin (`skills/runtime.py`), which progressively discloses skill metadata into the system prompt and loads full instructions on demand when the model activates a skill. Which skills an agent gets is single-sourced from its `metadata.yaml` `skills` list. A skill is expertise/context, not code — a skill's `allowed-tools` is documentation only; tool access is enforced by `ToolPolicyHook`. Skills are organized by pack so agents can load phase-relevant procedures without a monolithic prompt.
 
 | Pack | Purpose |
 |---|---|

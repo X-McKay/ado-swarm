@@ -17,30 +17,30 @@ We use Simon Willison's definitions:
 
 When working in this repository, preserve the core boundaries:
 
-1. Temporal workflows stay deterministic and delegate I/O to activities.
+1. Temporal workflows stay deterministic (`workflow.now()`, no I/O/model calls) and delegate I/O to activities.
 2. Azure DevOps and GitHub access goes through `tools/source_providers` ports and adapters.
-3. Agents live under `src/ado_swarm/agents/<agent_name>/` with `main.py`, `metadata.yaml`, `eval.py`, and `prompts.md`.
-4. New agent behavior must include or update isolated evaluations.
-5. Write-capable provider, Git, PR, and ticket operations must remain policy-gated.
+3. Agents live under `src/ado_swarm/agents/<agent_name>/` with `main.py` (a `CasefileAgent` subclass + `build_agent`), `metadata.yaml`, and `eval.py`.
+4. New agent behavior must include or update isolated golden evaluations.
+5. Write-capable provider, Git, PR, and ticket operations must be in `write_tool_names` and policy-gated behind approval.
 6. Run `just check` before finalizing changes.
 
-Prefer small, testable functions and update documentation when changing architecture or developer workflow.
+Prefer small, testable functions and update documentation (`CLAUDE.md`, `docs/`) when changing architecture or developer workflow.
 
 
-## Harness runtime conventions
+## Agent runtime conventions
 
-When changing agent execution, preserve the separation between Temporal and the agent runtime. Temporal owns durable workflow state, retries, Signals, Updates, approvals, and mission lifecycle. Agent modules may use the Strands-compatible runtime adapter through `BaseAgent`, but must continue returning `AgentResult` contracts.
+Every agent is a model-driven Strands `Agent` (tools in a loop) run inside a Temporal activity. The Strands plumbing lives in `agents/model_runtime.run_model_agent` (tools + `AgentSkills` + `ToolPolicyHook`, one non-deprecated `invoke_async(structured_output_model=...)`). Agents declare `tool_names`, `section_model`/`section_field`, and prompts; **skills come from `metadata.yaml`** (single source, applied by the registry). Do not hardcode skills in `main.py`, and do not put deterministic logic in `run()` — extract it to a `@tool` in `tools/catalog/`.
 
-Use `build_temporal_client()` instead of calling `Client.connect()` directly so Pydantic data conversion and future tracing configuration remain centralized. Use `ToolPolicy` and `ToolContext` before adding any write-capable tool path. High-risk tasks, write tools, and destructive operations must require an approved `ApprovalState`.
+Preserve the Temporal/Strands split: Temporal owns durable state, retries, Signals, Updates, approvals, and mission lifecycle; the agent returns an `AgentResult` contract. Use `build_temporal_client()` rather than `Client.connect()` directly. Tool access is enforced at the `BeforeToolCallEvent` hook (`tools/policy_hook.py`) — `ALLOW | DENY | REQUIRE_APPROVAL`. Model invocation comes from Strands providers (`model_gateway/strands_models.py::build_strands_model`); there is no hand-rolled completion path.
 
-New workflow-visible state should be represented as contracts first, then tested in isolation. For agent durability, prefer `AgentCheckpoint` and the checkpoint store rather than ad hoc files. For run-level auditability, use `RunArtifact` records for plans, context packs, execution logs, verification records, and decision records.
-
-Evaluation changes should support repeated trials and pass^k semantics. Add golden, edge, adversarial, and regression cases where possible, and keep the deterministic `fake` model path passing before testing local or remote models.
+New workflow-visible state should be contracts first, tested in isolation. Use `RunArtifact` records for run-level auditability. Evaluations use the shared harness (`eval_support.run_agent_eval`) with a scripted `FakeModel`; support pass^k, keep the deterministic `fake` path green before testing local/remote models.
 
 
-## Richer agent pipeline
+## Casefile pipeline
 
-For read-only security workflow changes, use `SecurityCasefile` as the handoff object. Agents should read a casefile from task constraints or artifact metadata with `casefile_from_invocation()` and emit updated state with `casefile_artifact()`. Each specialist owns a specific casefile field: repository evidence, adjudication, risk, remediation plan, or validation audit. Do not introduce prompt-only handoffs when a typed field can represent the state.
+`SecurityCasefile` is the typed handoff object. Agents read it with `casefile_from_invocation()` and emit one section via structured output; `CasefileAgent.run` writes the section and the `casefile_artifact`. Each specialist owns exactly one section (`normalized_finding`, `repository_evidence`, `adjudication`, `risk`, `remediation_plan`, `validation`, `execution`, `readiness`). A standalone analytics agent (`data_analyst`) emits a `CampaignReport` artifact instead. Never introduce prompt-only handoffs when a typed field can represent the state. The supervisor propagates each stage's casefile artifact to dependents via `TaskSpec.input_refs`.
+
+To add an agent/tool/skill, follow the step-by-step in `CLAUDE.md`.
 
 
 The default Temporal mission planner executes the full casefile pipeline in this order: `ticket_analyst`, `repo_analyst`, `security_reviewer`, `risk_auditor`, `solutions_architect`, and `test_engineer`. When modifying planner or workflow behavior, preserve dependency artifact propagation: downstream tasks should receive upstream casefile artifacts through `TaskSpec.input_refs`, and workflows should avoid storing mutable casefile state outside typed artifacts.
