@@ -1,0 +1,6 @@
+{
+  "provider": "stub",
+  "external_id": "SEC-1",
+  "title": "Dependency vulnerability in sample package",
+  "labels": ["security", "dependency"]
+}

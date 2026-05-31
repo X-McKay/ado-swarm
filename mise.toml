@@ -1,0 +1,18 @@
+[tools]
+python = "3.11"
+uv = "latest"
+just = "latest"
+prek = "latest"
+ruff = "latest"
+ty = "latest"
+jq = "latest"
+yq = "latest"
+
+[env]
+_.file = ".env"
+_.python.venv = { path = ".venv", create = true, uv_create_args = ["--seed"] }
+PYTHONPATH = "src"
+
+[tasks.setup]
+description = "Install Python dependencies and Git hooks"
+run = "uv sync --all-extras --dev && prek install"

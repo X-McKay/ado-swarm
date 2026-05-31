@@ -1,0 +1,20 @@
+id: security_reviewer
+name: Security Reviewer
+version: 0.1.0
+description: Adjudicates stale, duplicate, fixed, and false-positive findings.
+entrypoint: ado_swarm.agents.security_reviewer.main:build_agent
+eval_entrypoint: ado_swarm.agents.security_reviewer.eval:run_eval
+capabilities:
+  - security-reviewer
+skill_packs:
+  - triage-readonly
+skills:
+  - stale-finding-adjudication
+tools:
+  allowed:
+    - casefile_read
+    - blackboard_append
+  denied:
+    - provider_create_draft_pr
+    - git_write
+risk_tier: low

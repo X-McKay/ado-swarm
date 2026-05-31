@@ -1,0 +1,20 @@
+id: software_engineer
+name: Software Engineer
+version: 0.1.0
+description: Applies later sandboxed changes after approval.
+entrypoint: ado_swarm.agents.software_engineer.main:build_agent
+eval_entrypoint: ado_swarm.agents.software_engineer.eval:run_eval
+capabilities:
+  - software-engineer
+skill_packs:
+  - triage-readonly
+skills:
+  - dependency-remediation-execution
+tools:
+  allowed:
+    - casefile_read
+    - blackboard_append
+  denied:
+    - provider_create_draft_pr
+    - git_write
+risk_tier: low

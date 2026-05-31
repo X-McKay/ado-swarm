@@ -1,0 +1,20 @@
+id: solutions_architect
+name: Solutions Architect
+version: 0.1.0
+description: Produces bounded remediation plans.
+entrypoint: ado_swarm.agents.solutions_architect.main:build_agent
+eval_entrypoint: ado_swarm.agents.solutions_architect.eval:run_eval
+capabilities:
+  - solutions-architect
+skill_packs:
+  - triage-readonly
+skills:
+  - fix-plan-generation
+tools:
+  allowed:
+    - casefile_read
+    - blackboard_append
+  denied:
+    - provider_create_draft_pr
+    - git_write
+risk_tier: low

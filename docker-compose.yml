@@ -1,0 +1,65 @@
+services:
+  temporal-db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: temporal
+      POSTGRES_PASSWORD: temporal
+      POSTGRES_DB: temporal
+    volumes:
+      - temporal-db:/var/lib/postgresql/data
+
+  temporal:
+    image: temporalio/auto-setup:latest
+    depends_on: [temporal-db]
+    ports: ["7233:7233"]
+    environment:
+      DB: postgres12
+      DB_PORT: "5432"
+      POSTGRES_USER: temporal
+      POSTGRES_PWD: temporal
+      POSTGRES_SEEDS: temporal-db
+
+  app-db:
+    image: postgres:16
+    ports: ["5432:5432"]
+    environment:
+      POSTGRES_USER: ado_swarm
+      POSTGRES_PASSWORD: ado_swarm
+      POSTGRES_DB: ado_swarm
+    volumes:
+      - app-db:/var/lib/postgresql/data
+
+  neo4j:
+    image: neo4j:5.26
+    ports: ["7474:7474", "7687:7687"]
+    environment:
+      NEO4J_AUTH: neo4j/ado_swarm_dev_password
+      NEO4J_PLUGINS: '["apoc"]'
+    volumes:
+      - neo4j-data:/data
+      - neo4j-logs:/logs
+
+  api:
+    build: .
+    command: uv run uvicorn ado_swarm.api.app:app --host 0.0.0.0 --port 8000
+    env_file: .env
+    ports: ["8000:8000"]
+    depends_on: [temporal, app-db, neo4j]
+
+  supervisor-worker:
+    build: .
+    command: uv run python -m ado_swarm.workers.supervisor_worker
+    env_file: .env
+    depends_on: [temporal, app-db]
+
+  agent-worker:
+    build: .
+    command: uv run python -m ado_swarm.workers.agent_worker
+    env_file: .env
+    depends_on: [temporal, app-db, neo4j]
+
+volumes:
+  temporal-db:
+  app-db:
+  neo4j-data:
+  neo4j-logs:

@@ -1,0 +1,20 @@
+id: data_analyst
+name: Data Analyst
+version: 0.1.0
+description: Mines outcomes and campaign patterns.
+entrypoint: ado_swarm.agents.data_analyst.main:build_agent
+eval_entrypoint: ado_swarm.agents.data_analyst.eval:run_eval
+capabilities:
+  - data-analyst
+skill_packs:
+  - triage-readonly
+skills:
+  - campaign-discovery
+tools:
+  allowed:
+    - casefile_read
+    - blackboard_append
+  denied:
+    - provider_create_draft_pr
+    - git_write
+risk_tier: low
