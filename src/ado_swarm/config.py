@@ -23,6 +23,8 @@ class Settings(BaseSettings):
     model_provider: Literal["fake", "ollama", "openai_compatible", "bedrock", "litellm"] = "fake"
     model_id: str = "fake-deterministic"
     model_base_url: str | None = None
+    security_reviewer_use_swarm: bool = False
+    adjudication_swarm_max_model_calls: int = 8
     ado_org_url: str | None = None
     ado_project: str | None = None
     ado_pat: str | None = Field(default=None, repr=False)
