@@ -272,6 +272,107 @@ async def test_structured_output_wrong_type_raises() -> None:
 
 
 # --------------------------------------------------------------------------- #
+# (d) non-deprecated structured-output path: invoke_async(structured_output_model=)
+# --------------------------------------------------------------------------- #
+
+
+async def test_invoke_async_structured_output_injected_exact_instance() -> None:
+    exact = Finding(
+        title="SQL injection",
+        count=3,
+        score=9.8,
+        severity=Severity.HIGH,
+        tags=["sql", "owasp"],
+        nested=NestedModel(flag=True),
+        discovered_at=datetime.datetime(2021, 6, 1, tzinfo=datetime.UTC),
+        note="urgent",
+    )
+    agent = Agent(model=FakeModel(structured_outputs={Finding: exact}))
+
+    result = await agent.invoke_async("produce a finding", structured_output_model=Finding)
+
+    output = cast(Finding, result.structured_output)
+    assert output == exact
+    assert output.title == "SQL injection"
+    assert output.severity is Severity.HIGH
+
+
+async def test_invoke_async_structured_output_after_normal_tool_call() -> None:
+    """Reasoning-then-structured-output in ONE invocation: a scripted tool runs
+    first, then the forced structured-output tool is emitted."""
+    side_effects: list[tuple[int, int]] = []
+
+    @tool
+    def add(a: int, b: int) -> int:
+        """Add two integers."""
+        side_effects.append((a, b))
+        return a + b
+
+    exact = Finding(
+        title="sum recorded",
+        count=5,
+        score=1.0,
+        severity=Severity.LOW,
+        tags=["math"],
+        nested=NestedModel(flag=False),
+        discovered_at=datetime.datetime(2023, 3, 3, tzinfo=datetime.UTC),
+    )
+    model = FakeModel(
+        script=[ScriptStep(tool_calls=[ToolCall(name="add", input={"a": 2, "b": 3})])],
+        structured_outputs={Finding: exact},
+    )
+    agent = Agent(model=model, tools=[add])
+
+    result = await agent.invoke_async("add 2 and 3 then report", structured_output_model=Finding)
+
+    # The normal scripted tool actually ran ...
+    assert side_effects == [(2, 3)]
+    # ... and the forced structured output resolved to the injected instance.
+    output = cast(Finding, result.structured_output)
+    assert output == exact
+    assert output.title == "sum recorded"
+
+
+async def test_invoke_async_structured_output_responder_hook() -> None:
+    seen: list[type[BaseModel]] = []
+
+    def responder(output_model: type[BaseModel], messages):
+        seen.append(output_model)
+        return Finding(
+            title="from responder",
+            count=1,
+            score=1.0,
+            severity=Severity.HIGH,
+            tags=["x"],
+            nested=NestedModel(flag=True),
+            discovered_at=datetime.datetime(2022, 1, 1, tzinfo=datetime.UTC),
+        )
+
+    agent = Agent(model=FakeModel(structured_responder=responder))
+
+    result = await agent.invoke_async("produce a finding", structured_output_model=Finding)
+
+    output = cast(Finding, result.structured_output)
+    assert output.title == "from responder"
+    assert output.severity is Severity.HIGH
+    # The responder received the exact output_model type recovered from the
+    # forced structured-output tool.
+    assert seen == [Finding]
+
+
+async def test_invoke_async_structured_output_synthesized_instance() -> None:
+    agent = Agent(model=FakeModel())
+
+    result = await agent.invoke_async("produce a finding", structured_output_model=Finding)
+
+    output = cast(Finding, result.structured_output)
+    assert isinstance(output, Finding)
+    assert output.title == ""
+    assert output.severity is Severity.LOW
+    assert output.nested.flag is False
+
+
+# --------------------------------------------------------------------------- #
 # config / count_tokens
 # --------------------------------------------------------------------------- #
 

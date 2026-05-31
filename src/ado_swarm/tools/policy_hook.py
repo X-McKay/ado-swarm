@@ -15,8 +15,9 @@ from strands.hooks import BeforeToolCallEvent, HookProvider, HookRegistry
 
 from ado_swarm.tools.policy import ToolContext, ToolPolicy
 
-# Harness-internal tools (e.g. the AgentSkills `skills` tool) are not domain tools
-# and must never be gated by the casefile tool policy.
+# Harness-internal tools (e.g. the AgentSkills `skills` tool and the forced
+# structured-output tool, whose name is the section model's class name) are not
+# domain tools and must never be gated by the casefile tool policy.
 HARNESS_TOOLS = frozenset({"skills"})
 
 
@@ -28,9 +29,17 @@ class PolicyOutcome:
 
 
 class ToolPolicyHook(HookProvider):
-    def __init__(self, policy: ToolPolicy, context: ToolContext) -> None:
+    def __init__(
+        self,
+        policy: ToolPolicy,
+        context: ToolContext,
+        *,
+        harness_tools: frozenset[str] | set[str] = frozenset(),
+    ) -> None:
         self.policy = policy
         self.context = context
+        # Caller-supplied harness tools (e.g. the structured-output tool) bypass policy.
+        self.harness_tools = HARNESS_TOOLS | frozenset(harness_tools)
         self.outcome = PolicyOutcome()
 
     def register_hooks(self, registry: HookRegistry, **kwargs: Any) -> None:
@@ -38,7 +47,7 @@ class ToolPolicyHook(HookProvider):
 
     def gate(self, event: BeforeToolCallEvent) -> None:
         name = event.tool_use["name"]
-        if name in HARNESS_TOOLS:
+        if name in self.harness_tools:
             return
         decision = self.policy.check(name, self.context)
         if decision.allowed:

@@ -11,7 +11,6 @@ inlined now lives in the tool catalog.
 from __future__ import annotations
 
 import json
-import warnings
 from dataclasses import dataclass, field
 from time import perf_counter
 from typing import ClassVar
@@ -91,7 +90,10 @@ class CasefileAgent:
         self, invocation: AgentInvocation
     ) -> tuple[Agent, ToolPolicyHook, AgentSkills | None]:
         policy = ToolPolicy(self.tool_names)
-        hook = ToolPolicyHook(policy, self._tool_context(invocation))
+        # The forced structured-output tool is named after the section model; it is
+        # harness machinery and must bypass the domain tool policy.
+        harness_tools = {self.section_model.__name__} if self.section_model else set()
+        hook = ToolPolicyHook(policy, self._tool_context(invocation), harness_tools=harness_tools)
         plugin = build_skills_plugin(self.skill_names)
         agent = Agent(
             model=self._resolve_model(),
@@ -117,15 +119,23 @@ class CasefileAgent:
             )
 
         agent, hook, plugin = self._build_strands_agent(invocation)
-        await agent.invoke_async(self.reasoning_prompt(casefile))
-        # TODO(structured-output): migrate to the single-invocation, non-deprecated
-        # path `invoke_async(prompt, structured_output_model=...)` once FakeModel
-        # supports the forced structured-output tool. That path also keeps tool
-        # results in context for the structured emission on real models.
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore", DeprecationWarning)
-            section = await agent.structured_output_async(
-                self.section_model, self.section_prompt(casefile)
+        # One non-deprecated invocation: the model reasons (calling tools through the
+        # policy gate) and emits the typed section in the same loop, so the structured
+        # output reflects the tool results in context (matters on real models).
+        result = await agent.invoke_async(
+            self.reasoning_prompt(casefile),
+            structured_output_model=self.section_model,
+            structured_output_prompt=self.section_prompt(casefile),
+        )
+        section = result.structured_output
+        if section is None:
+            return AgentResult(
+                run_id=invocation.run_id,
+                task_id=invocation.task.task_id,
+                state=TaskState.FAILED,
+                summary=f"{self.display_name} did not produce a {self.section_field}.",
+                error_type="ValidationFailed",
+                error_message="model returned no structured output",
             )
         setattr(casefile, self.section_field, section)
 

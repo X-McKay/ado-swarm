@@ -18,7 +18,7 @@ import enum
 import json
 import uuid
 from collections.abc import AsyncGenerator, Callable, Sequence
-from typing import TYPE_CHECKING, Any, TypeVar
+from typing import TYPE_CHECKING, Any, TypeVar, cast
 
 from pydantic import BaseModel
 from pydantic.fields import FieldInfo
@@ -172,7 +172,24 @@ class FakeModel(Model):
         ``contentBlockStop`` -> ``messageStop`` -> ``metadata``. In scripted
         tool-use turns a ``toolUse`` content block is emitted and the message
         stops with ``stopReason="tool_use"``.
+
+        Structured-output forcing: when the Strands event loop forces structured
+        output it re-invokes ``stream`` with ``tool_choice`` set (the forced
+        ``{"any": {}}`` / ``{"tool": {...}}`` shape) and ``tool_specs`` reduced
+        to the single structured-output tool. This branch detects that case and
+        emits a ``toolUse`` for the forced tool whose ``input`` is the resolved
+        structured-output instance (serialized to JSON) -- *without* consuming a
+        scripted step -- so the non-deprecated
+        ``invoke_async(structured_output_model=...)`` path works.
         """
+        forced = self._forced_structured_output(tool_specs, tool_choice, invocation_state)
+        if forced is not None:
+            async for event in self._stream_forced_structured_output(
+                forced, messages, tool_specs, system_prompt
+            ):
+                yield event
+            return
+
         step = self._next_step()
 
         input_tokens = await self.count_tokens(messages, tool_specs, system_prompt)
@@ -230,18 +247,135 @@ class FakeModel(Model):
         self._step_index += 1
         return step
 
-    # -- structured output ---------------------------------------------------
+    # -- forced structured output (non-deprecated path) ----------------------
 
-    async def structured_output(
+    def _forced_structured_output(
         self,
-        output_model: type[T],
-        prompt: Messages,
-        system_prompt: str | None = None,
-        **kwargs: Any,
-    ) -> AsyncGenerator[dict[str, T | Any], None]:
-        """Yield ``{"output": <instance of output_model>}`` deterministically."""
+        tool_specs: list[ToolSpec] | None,
+        tool_choice: ToolChoice | None,
+        invocation_state: dict[str, Any] | None,
+    ) -> tuple[type[BaseModel], ToolSpec] | None:
+        """Detect a forced structured-output ``stream`` call.
+
+        Strands' event loop forces structured output by re-invoking ``stream``
+        with a truthy ``tool_choice`` (the ``{"any": {}}`` / ``{"tool": {...}}``
+        shape) and ``tool_specs`` reduced to the single structured-output tool
+        spec (whose ``name`` equals the Pydantic model class name).
+
+        Returns the resolved ``(output_model, tool_spec)`` pair when this call is
+        a forced structured-output request, or ``None`` for an ordinary call.
+        """
+        if not tool_choice or not tool_specs:
+            return None
+
+        # In forced mode Strands passes exactly the one structured-output tool.
+        # Identify the spec named by an explicit ``{"tool": {"name": ...}}``
+        # choice, otherwise the sole spec for an ``{"any": {}}`` choice.
+        forced_name = None
+        choice = cast("dict[str, Any]", tool_choice)
+        if isinstance(choice, dict):
+            tool_sel = choice.get("tool")
+            if isinstance(tool_sel, dict):
+                forced_name = tool_sel.get("name")
+
+        candidate: ToolSpec | None = None
+        if forced_name is not None:
+            candidate = next((s for s in tool_specs if s.get("name") == forced_name), None)
+        elif len(tool_specs) == 1:
+            candidate = tool_specs[0]
+        if candidate is None:
+            return None
+
+        output_model = self._resolve_output_model(candidate, invocation_state)
+        if output_model is None:
+            return None
+        return output_model, candidate
+
+    @staticmethod
+    def _resolve_output_model(
+        tool_spec: ToolSpec,
+        invocation_state: dict[str, Any] | None,
+    ) -> type[BaseModel] | None:
+        """Recover the exact ``output_model`` type backing a structured-output tool.
+
+        The event loop registers a ``StructuredOutputTool`` (whose
+        ``structured_output_model`` is the original Pydantic class) as a dynamic
+        tool on the agent, and stores the agent on ``invocation_state``. Matching
+        the forced tool spec's ``name`` against that registry recovers the exact
+        type, so responder / mapping / synthesis all dispatch correctly.
+        """
+        tool_name = tool_spec.get("name")
+        if not tool_name or not invocation_state:
+            return None
+        agent = invocation_state.get("agent")
+        registry = getattr(agent, "tool_registry", None)
+        if registry is None:
+            return None
+        for tools in (
+            getattr(registry, "dynamic_tools", {}),
+            getattr(registry, "registry", {}),
+        ):
+            tool = tools.get(tool_name)
+            model = getattr(tool, "structured_output_model", None)
+            if isinstance(model, type) and issubclass(model, BaseModel):
+                return model
+        return None
+
+    async def _stream_forced_structured_output(
+        self,
+        forced: tuple[type[BaseModel], ToolSpec],
+        messages: Messages,
+        tool_specs: list[ToolSpec] | None,
+        system_prompt: str | None,
+    ) -> AsyncGenerator[StreamEvent, None]:
+        """Emit a ``toolUse`` for the forced structured-output tool.
+
+        The ``input`` is the resolved structured-output instance serialized to
+        JSON (``model_dump(mode="json")``), which round-trips back through the
+        tool's Pydantic validation in the event loop. Resolution reuses the
+        existing precedence: responder -> mapping -> synthesized instance.
+        """
+        output_model, tool_spec = forced
+        instance = self._resolve_structured_instance(output_model, messages)
+        tool_name = str(tool_spec.get("name"))
+        tool_use_id = _deterministic_tool_use_id(self._step_index, tool_name)
+
+        input_tokens = await self.count_tokens(messages, tool_specs, system_prompt)
+
+        yield {"messageStart": {"role": "assistant"}}
+        yield {
+            "contentBlockStart": {
+                "start": {"toolUse": {"name": tool_name, "toolUseId": tool_use_id}}
+            }
+        }
+        serialized = json.dumps(instance.model_dump(mode="json"))
+        yield {"contentBlockDelta": {"delta": {"toolUse": {"input": serialized}}}}
+        yield {"contentBlockStop": {}}
+        yield {"messageStop": {"stopReason": "tool_use"}}
+
+        output_tokens = max(1, len(serialized) // 4)
+        yield {
+            "metadata": {
+                "usage": {
+                    "inputTokens": input_tokens,
+                    "outputTokens": output_tokens,
+                    "totalTokens": input_tokens + output_tokens,
+                },
+                "metrics": {"latencyMs": 1},
+            }
+        }
+
+    def _resolve_structured_instance(
+        self, output_model: type[BaseModel], messages: Messages
+    ) -> BaseModel:
+        """Resolve a structured-output instance using the existing precedence.
+
+        Order: ``structured_responder`` -> ``structured_outputs[output_model]``
+        -> synthesized instance. Validates the result is an instance of
+        ``output_model`` (matching :meth:`structured_output`).
+        """
         if self._structured_responder is not None:
-            instance = self._structured_responder(output_model, prompt)
+            instance: BaseModel = self._structured_responder(output_model, messages)
         elif output_model in self._structured_outputs:
             instance = self._structured_outputs[output_model]
         else:
@@ -252,7 +386,20 @@ class FakeModel(Model):
                 f"Structured output for {output_model.__name__} is "
                 f"{type(instance).__name__}, expected an instance of {output_model.__name__}"
             )
-        yield {"output": instance}
+        return instance
+
+    # -- structured output ---------------------------------------------------
+
+    async def structured_output(
+        self,
+        output_model: type[T],
+        prompt: Messages,
+        system_prompt: str | None = None,
+        **kwargs: Any,
+    ) -> AsyncGenerator[dict[str, T | Any], None]:
+        """Yield ``{"output": <instance of output_model>}`` deterministically."""
+        instance = self._resolve_structured_instance(output_model, prompt)
+        yield {"output": cast("T", instance)}
 
     @classmethod
     def _synthesize_model(cls, output_model: type[T]) -> T:
