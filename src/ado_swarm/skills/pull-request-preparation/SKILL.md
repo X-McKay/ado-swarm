@@ -1,16 +1,16 @@
 ---
-name: security-ticket-normalization
-description: Normalize provider issues, work items, and security alerts into canonical casefiles.
+name: pull-request-preparation
+description: Prepare draft pull requests with evidence, risk notes, validation results, and rollback guidance.
 allowed-tools: provider_get_issue provider_get_repo_metadata casefile_read blackboard_append graphiti_search policy_check_action
 metadata:
-  pack: triage-readonly
+  pack: validation-submission
   maturity: base
 ---
-# security-ticket-normalization
+# pull-request-preparation
 
 ## Objective
 
-Normalize provider issues, work items, and security alerts into canonical casefiles.
+Prepare draft pull requests with evidence, risk notes, validation results, and rollback guidance.
 
 ## Required inputs
 
@@ -26,4 +26,4 @@ A canonical casefile or task context, provider metadata, available repository ev
 
 ## Output expectations
 
-Return concise findings suitable for inclusion in `AgentResult`, casefile sections, and task audit events. Include activated skill name `security-ticket-normalization` in audit metadata.
+Return concise findings suitable for inclusion in `AgentResult`, casefile sections, and task audit events. Include activated skill name `pull-request-preparation` in audit metadata.

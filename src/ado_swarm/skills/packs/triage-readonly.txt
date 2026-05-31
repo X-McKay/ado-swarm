@@ -1,4 +1,3 @@
+finding-type-classification
+scanner-finding-fingerprinting
 security-ticket-normalization
-repository-resolution
-stale-finding-adjudication
-security-risk-scoring

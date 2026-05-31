@@ -8,6 +8,7 @@ from temporalio.worker import Worker
 from ado_swarm.activities.planning import plan_mission
 from ado_swarm.activities.run_agent import run_agent
 from ado_swarm.config import get_settings
+from ado_swarm.workflows.agent_task import AgentTaskWorkflow
 from ado_swarm.workflows.supervisor import SupervisorWorkflow
 
 
@@ -17,7 +18,7 @@ async def main() -> None:
     worker = Worker(
         client,
         task_queue=settings.temporal_task_queue,
-        workflows=[SupervisorWorkflow],
+        workflows=[SupervisorWorkflow, AgentTaskWorkflow],
         activities=[plan_mission, run_agent],
     )
     await worker.run()

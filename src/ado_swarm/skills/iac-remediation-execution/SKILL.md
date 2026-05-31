@@ -1,16 +1,16 @@
 ---
-name: security-ticket-normalization
-description: Normalize provider issues, work items, and security alerts into canonical casefiles.
+name: iac-remediation-execution
+description: Apply narrowly scoped infrastructure-as-code fixes with policy checks and validation.
 allowed-tools: provider_get_issue provider_get_repo_metadata casefile_read blackboard_append graphiti_search policy_check_action
 metadata:
-  pack: triage-readonly
+  pack: remediation
   maturity: base
 ---
-# security-ticket-normalization
+# iac-remediation-execution
 
 ## Objective
 
-Normalize provider issues, work items, and security alerts into canonical casefiles.
+Apply narrowly scoped infrastructure-as-code fixes with policy checks and validation.
 
 ## Required inputs
 
@@ -26,4 +26,4 @@ A canonical casefile or task context, provider metadata, available repository ev
 
 ## Output expectations
 
-Return concise findings suitable for inclusion in `AgentResult`, casefile sections, and task audit events. Include activated skill name `security-ticket-normalization` in audit metadata.
+Return concise findings suitable for inclusion in `AgentResult`, casefile sections, and task audit events. Include activated skill name `iac-remediation-execution` in audit metadata.

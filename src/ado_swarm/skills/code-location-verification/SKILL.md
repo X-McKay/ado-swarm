@@ -1,16 +1,16 @@
 ---
-name: security-ticket-normalization
-description: Normalize provider issues, work items, and security alerts into canonical casefiles.
+name: code-location-verification
+description: Verify whether referenced files, lines, manifests, symbols, or paths still exist.
 allowed-tools: provider_get_issue provider_get_repo_metadata casefile_read blackboard_append graphiti_search policy_check_action
 metadata:
-  pack: triage-readonly
+  pack: repository-investigation
   maturity: base
 ---
-# security-ticket-normalization
+# code-location-verification
 
 ## Objective
 
-Normalize provider issues, work items, and security alerts into canonical casefiles.
+Verify whether referenced files, lines, manifests, symbols, or paths still exist.
 
 ## Required inputs
 
@@ -26,4 +26,4 @@ A canonical casefile or task context, provider metadata, available repository ev
 
 ## Output expectations
 
-Return concise findings suitable for inclusion in `AgentResult`, casefile sections, and task audit events. Include activated skill name `security-ticket-normalization` in audit metadata.
+Return concise findings suitable for inclusion in `AgentResult`, casefile sections, and task audit events. Include activated skill name `code-location-verification` in audit metadata.

@@ -41,6 +41,15 @@ class SourceIssue(BaseModel):
     provider_payload: dict[str, Any] = Field(default_factory=dict)
 
 
+class SourceIssuePage(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    provider: SourceProviderKind
+    items: list[SourceIssue]
+    query: str
+    limit: int
+
+
 class SourceFile(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -50,6 +59,16 @@ class SourceFile(BaseModel):
     content: str
     sha: str | None = None
     url: str | None = None
+
+
+class SourceBranch(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    repository: SourceRepositoryRef
+    name: str
+    sha: str | None = None
+    protected: bool = False
+    provider_payload: dict[str, Any] = Field(default_factory=dict)
 
 
 class SourcePullRequest(BaseModel):
@@ -62,6 +81,7 @@ class SourcePullRequest(BaseModel):
     source_branch: str
     target_branch: str
     is_draft: bool = True
+    state: str = "open"
     provider_payload: dict[str, Any] = Field(default_factory=dict)
 
 

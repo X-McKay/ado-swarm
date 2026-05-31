@@ -1,16 +1,16 @@
 ---
-name: security-ticket-normalization
-description: Normalize provider issues, work items, and security alerts into canonical casefiles.
+name: automation-eligibility-assessment
+description: Decide whether a finding is eligible for automated, semi-automated, or human-only remediation.
 allowed-tools: provider_get_issue provider_get_repo_metadata casefile_read blackboard_append graphiti_search policy_check_action
 metadata:
-  pack: triage-readonly
+  pack: risk-impact
   maturity: base
 ---
-# security-ticket-normalization
+# automation-eligibility-assessment
 
 ## Objective
 
-Normalize provider issues, work items, and security alerts into canonical casefiles.
+Decide whether a finding is eligible for automated, semi-automated, or human-only remediation.
 
 ## Required inputs
 
@@ -26,4 +26,4 @@ A canonical casefile or task context, provider metadata, available repository ev
 
 ## Output expectations
 
-Return concise findings suitable for inclusion in `AgentResult`, casefile sections, and task audit events. Include activated skill name `security-ticket-normalization` in audit metadata.
+Return concise findings suitable for inclusion in `AgentResult`, casefile sections, and task audit events. Include activated skill name `automation-eligibility-assessment` in audit metadata.

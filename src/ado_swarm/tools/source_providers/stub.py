@@ -3,8 +3,11 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 from ado_swarm.contracts.source_provider import (
+    ProviderMutationResult,
+    SourceBranch,
     SourceFile,
     SourceIssue,
+    SourceIssuePage,
     SourceProviderKind,
     SourcePullRequest,
     SourceRepositoryRef,
@@ -39,13 +42,35 @@ class StubSourceProvider:
     async def get_issue(self, external_id: str) -> SourceIssue:
         return self.issue.model_copy(update={"external_id": external_id})
 
-    async def search_issues(self, query: str, *, limit: int = 50) -> list[SourceIssue]:
-        return [self.issue.model_copy(update={"provider_payload": {"query": query}})][:limit]
+    async def search_issues(self, query: str, *, limit: int = 50) -> SourceIssuePage:
+        issue = self.issue.model_copy(update={"provider_payload": {"query": query}})
+        return SourceIssuePage(
+            provider=SourceProviderKind.STUB, items=[issue][:limit], query=query, limit=limit
+        )
+
+    async def add_issue_comment(self, external_id: str, body: str) -> ProviderMutationResult:
+        return ProviderMutationResult(
+            provider=SourceProviderKind.STUB,
+            ok=True,
+            external_id=external_id,
+            url=f"https://example.invalid/issues/{external_id}#comment-1",
+            message="stub issue comment recorded",
+            provider_payload={"body": body},
+        )
 
     async def get_repository(self, owner_or_project: str, name: str) -> SourceRepositoryRef:
         return self.repository.model_copy(
             update={"owner_or_project": owner_or_project, "name": name}
         )
+
+    async def list_branches(
+        self, repository: SourceRepositoryRef, *, limit: int = 100
+    ) -> list[SourceBranch]:
+        return [
+            SourceBranch(
+                repository=repository, name=repository.default_branch or "main", sha="stub-sha"
+            )
+        ]
 
     async def get_file(self, repository: SourceRepositoryRef, path: str, ref: str) -> SourceFile:
         return SourceFile(
@@ -69,4 +94,16 @@ class StubSourceProvider:
             target_branch=target_branch,
             is_draft=True,
             provider_payload={"body": body, "repository": repository.model_dump(mode="json")},
+        )
+
+    async def add_pr_comment(
+        self, repository: SourceRepositoryRef, pr_external_id: str, body: str
+    ) -> ProviderMutationResult:
+        return ProviderMutationResult(
+            provider=SourceProviderKind.STUB,
+            ok=True,
+            external_id=pr_external_id,
+            url=f"{repository.web_url}/pull/{pr_external_id}#comment-1",
+            message="stub pull request comment recorded",
+            provider_payload={"body": body},
         )

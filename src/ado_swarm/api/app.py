@@ -2,8 +2,9 @@ from __future__ import annotations
 
 from uuid import uuid4
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
+from temporalio.client import Client
 
 from ado_swarm.agents.registry import list_agent_metadata
 from ado_swarm.config import get_settings
@@ -36,6 +37,18 @@ async def agents() -> list[dict]:
 
 @app.post("/missions")
 async def start_mission(request: MissionRequest) -> dict:
-    # API wiring is present; Temporal start is kept in CLI/worker paths
-    # for local simplicity in the base runtime.
-    return {"run_id": str(uuid4()), "goal": request.goal, "status": "created"}
+    settings = get_settings()
+    run_id = str(uuid4())
+    try:
+        client = await Client.connect(
+            settings.temporal_address, namespace=settings.temporal_namespace
+        )
+        handle = await client.start_workflow(
+            "SupervisorWorkflow",
+            args=[run_id, request.goal],
+            id=f"mission:{run_id}",
+            task_queue=settings.temporal_task_queue,
+        )
+    except Exception as exc:  # pragma: no cover - exercised in deployed Temporal environment
+        raise HTTPException(status_code=503, detail=f"Temporal unavailable: {exc}") from exc
+    return {"run_id": run_id, "workflow_id": handle.id, "goal": request.goal, "status": "started"}
