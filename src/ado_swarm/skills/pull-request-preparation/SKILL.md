@@ -1,7 +1,7 @@
 ---
 name: pull-request-preparation
-description: Prepare draft pull requests with evidence, risk notes, validation results, and rollback guidance.
-allowed-tools: provider_get_issue provider_get_repo_metadata casefile_read blackboard_append graphiti_search policy_check_action
+description: Use this skill when assembling a DRAFT pull request for a verified, validated remediation so a human can review and merge it.
+allowed-tools: resolve_repository provider_get_repo_metadata summarize_findings graphiti_search
 metadata:
   pack: validation-submission
   maturity: base
@@ -10,20 +10,52 @@ metadata:
 
 ## Objective
 
-Prepare draft pull requests with evidence, risk notes, validation results, and rollback guidance.
+Produce a clear, reviewable DRAFT pull request that packages a remediation whose diff has been
+reviewed, security-verified, and test/build-validated — for human review, never auto-merge.
 
-## Required inputs
+## When to use
 
-A canonical casefile or task context, provider metadata, available repository evidence, prior audit events, and applicable policy constraints.
+The finding has a passing review, security verification, and validation, and
+`readiness.ready == true`. Do not prepare a PR for unverified or blocked work.
+
+## Inputs
+
+- `normalized_finding`, `execution.diff_summary`, `validation`, `readiness`.
+- `repository_evidence.repository` and `provider_get_repo_metadata` (default branch, conventions, labels).
 
 ## Procedure
 
-1. Confirm that the task objective matches this skill and identify missing evidence.
-2. Work only from canonical contracts and explicitly referenced evidence.
-3. Request only tools allowed by the active runtime policy; `allowed-tools` is descriptive, not enforcement.
-4. Produce structured, audit-friendly output with confidence, rationale, evidence references, and stop conditions.
-5. Escalate rather than guess when evidence is missing, ambiguous, sensitive, or outside the safe change boundary.
+1. Confirm upstream gates are green (review approved, verification passed, `validation` clean,
+   `readiness.ready`). If any gate is unmet, do not draft a PR.
+2. `resolve_repository` + `provider_get_repo_metadata` to get the base (default) branch and
+   naming/label conventions.
+3. Compose a branch name like `remediation/<finding_id>-<short-slug>`.
+4. Write a title referencing the finding and a body covering: the vulnerability
+   (cwe/category/severity), the fix summary, evidence (scanner-clean + test/build results), and
+   the change boundary. Use `summarize_findings` to keep multi-finding PRs coherent.
+5. Apply security/triage labels per repo metadata.
+
+## Decision criteria
+
+- One logical remediation per PR; group only tightly related findings sharing a change boundary.
+- The body must let a reviewer approve without re-deriving context — link all evidence.
+
+## Checklist
+
+- [ ] base = default branch; branch name unique and descriptive.
+- [ ] Body cites verification + validation evidence (no unsupported "this is safe").
+- [ ] Labels set; PR marked DRAFT.
 
 ## Output expectations
 
-Return concise findings suitable for inclusion in `AgentResult`, casefile sections, and task audit events. Include activated skill name `pull-request-preparation` in audit metadata.
+A pull-request draft (title, body, branch, base, labels); set `final_disposition` toward
+`draft_pr_created`.
+
+## Safety
+
+Draft only — never merge, never enable auto-merge, never push without human review. Do not
+include secrets or raw exploit payloads in the PR body.
+
+## Escalation
+
+Missing upstream evidence or conflicting branch state → do not draft; route to `needs_human`.
