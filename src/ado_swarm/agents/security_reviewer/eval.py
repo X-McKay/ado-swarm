@@ -8,7 +8,33 @@ from uuid import uuid4
 
 from ado_swarm.agents.eval_support import build_eval_model_gateway
 from ado_swarm.agents.security_reviewer.main import build_agent
+from ado_swarm.agents.ticket_analyst.normalization import build_casefile
+from ado_swarm.contracts.casefile import (
+    RepositoryEvidence,
+)
 from ado_swarm.contracts.mission import AgentInvocation, TaskSpec
+from ado_swarm.contracts.source_provider import SourceIssue
+
+
+def _fixture_casefile() -> dict:
+    issue = SourceIssue.model_validate(
+        json.loads(Path("tests/fixtures/source_issues/codeql_sast.json").read_text())
+    )
+    casefile = build_casefile("eval-run", issue)
+    casefile.repository_evidence = RepositoryEvidence.model_validate(
+        {
+            "repository": casefile.source_issue.repository.model_dump(mode="json")
+            if casefile.source_issue.repository
+            else None,
+            "ref": "main",
+            "file_exists": True,
+            "evidence": ["fixture repository evidence"],
+        }
+    )
+    casefile.adjudication = None
+    casefile.risk = None
+    casefile.remediation_plan = None
+    return casefile.model_dump(mode="json")
 
 
 async def run_eval(model_profile: str = "fake") -> dict:
@@ -16,9 +42,10 @@ async def run_eval(model_profile: str = "fake") -> dict:
     task = TaskSpec(
         run_id="eval-run",
         title="Evaluate Security Reviewer",
-        objective="Run deterministic isolated evaluation for Security Reviewer.",
+        objective="Run deterministic casefile evaluation for Security Reviewer.",
         capability="security_reviewer",
         agent_id="security_reviewer",
+        constraints={"casefile": _fixture_casefile()},
     )
     result = await agent.run(
         AgentInvocation(
@@ -29,9 +56,11 @@ async def run_eval(model_profile: str = "fake") -> dict:
             idempotency_key=str(uuid4()),
         )
     )
+    casefile = result.artifact_refs[0].metadata["casefile"] if result.artifact_refs else {}
+    passed = result.state == "completed" and casefile.get("adjudication") is not None
     return {
         "agent_id": "security_reviewer",
-        "passed": result.state == "completed",
+        "passed": passed,
         "result": result.model_dump(mode="json"),
     }
 

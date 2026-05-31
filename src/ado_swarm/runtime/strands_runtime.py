@@ -34,7 +34,7 @@ class StrandsAgentRuntime:
             f"Constraints: {invocation.task.constraints}\n"
         )
         try:
-            from strands import Agent  # type: ignore
+            from strands import Agent
         except Exception:
             text = await self.model_gateway.complete(prompt)
             return StrandsRuntimeResult(text=text, telemetry={"runtime": "model_gateway_fallback"})

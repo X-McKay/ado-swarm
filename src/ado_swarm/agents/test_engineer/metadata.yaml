@@ -1,7 +1,7 @@
 id: test_engineer
 name: Test Engineer
-version: 0.1.0
-description: Validates diffs and prepares later draft PRs.
+version: 0.2.0
+description: Builds validation checklists and review-readiness decisions for planned remediations.
 entrypoint: ado_swarm.agents.test_engineer.main:build_agent
 eval_entrypoint: ado_swarm.agents.test_engineer.eval:run_eval
 capabilities:
@@ -18,3 +18,6 @@ tools:
     - provider_create_draft_pr
     - git_write
 risk_tier: low
+outputs:
+  - security_casefile
+  - audit_metadata

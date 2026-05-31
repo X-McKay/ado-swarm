@@ -1,0 +1,26 @@
+{
+  "provider": "github",
+  "external_id": "GHSA-42",
+  "url": "https://github.example/acme/api/issues/42",
+  "title": "CodeQL high severity SQL injection CWE-89 in src/api/users.py line 128",
+  "body": "CodeQL detected SQL injection in src/api/users.py at line 128. Rule: py/sql-injection. CWE-89.",
+  "state": "open",
+  "labels": ["security", "codeql", "high", "sast"],
+  "repository": {
+    "provider": "github",
+    "external_id": "acme/api",
+    "owner_or_project": "acme",
+    "name": "api",
+    "default_branch": "main",
+    "clone_url": "https://github.example/acme/api.git",
+    "web_url": "https://github.example/acme/api"
+  },
+  "provider_payload": {
+    "scanner": "CodeQL",
+    "severity": "high",
+    "category": "sast",
+    "cwe": "CWE-89",
+    "file_path": "src/api/users.py",
+    "line": "128"
+  }
+}

@@ -1,7 +1,7 @@
 id: risk_auditor
 name: Risk Auditor
-version: 0.1.0
-description: Scores security risk and automation eligibility.
+version: 0.2.0
+description: Classifies risk and automation eligibility for adjudicated security casefiles.
 entrypoint: ado_swarm.agents.risk_auditor.main:build_agent
 eval_entrypoint: ado_swarm.agents.risk_auditor.eval:run_eval
 capabilities:
@@ -18,3 +18,6 @@ tools:
     - provider_create_draft_pr
     - git_write
 risk_tier: low
+outputs:
+  - security_casefile
+  - audit_metadata

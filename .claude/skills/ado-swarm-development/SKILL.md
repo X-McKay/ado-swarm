@@ -25,3 +25,8 @@ Use `build_temporal_client()` instead of calling `Client.connect()` directly so 
 New workflow-visible state should be represented as contracts first, then tested in isolation. For agent durability, prefer `AgentCheckpoint` and the checkpoint store rather than ad hoc files. For run-level auditability, use `RunArtifact` records for plans, context packs, execution logs, verification records, and decision records.
 
 Evaluation changes should support repeated trials and pass^k semantics. Add golden, edge, adversarial, and regression cases where possible, and keep the deterministic `fake` model path passing before testing local or remote models.
+
+
+## Richer agent pipeline
+
+For read-only security workflow changes, use `SecurityCasefile` as the handoff object. Agents should read a casefile from task constraints or artifact metadata with `casefile_from_invocation()` and emit updated state with `casefile_artifact()`. Each specialist owns a specific casefile field: repository evidence, adjudication, risk, remediation plan, or validation audit. Do not introduce prompt-only handoffs when a typed field can represent the state.

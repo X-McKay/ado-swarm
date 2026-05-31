@@ -8,7 +8,52 @@ from uuid import uuid4
 
 from ado_swarm.agents.eval_support import build_eval_model_gateway
 from ado_swarm.agents.solutions_architect.main import build_agent
+from ado_swarm.agents.ticket_analyst.normalization import build_casefile
+from ado_swarm.contracts.casefile import (
+    FindingAdjudication,
+    RepositoryEvidence,
+    RiskClassification,
+)
 from ado_swarm.contracts.mission import AgentInvocation, TaskSpec
+from ado_swarm.contracts.source_provider import SourceIssue
+
+
+def _fixture_casefile() -> dict:
+    issue = SourceIssue.model_validate(
+        json.loads(Path("tests/fixtures/source_issues/codeql_sast.json").read_text())
+    )
+    casefile = build_casefile("eval-run", issue)
+    casefile.repository_evidence = RepositoryEvidence.model_validate(
+        {
+            "repository": casefile.source_issue.repository.model_dump(mode="json")
+            if casefile.source_issue.repository
+            else None,
+            "ref": "main",
+            "file_exists": True,
+            "evidence": ["fixture repository evidence"],
+        }
+    )
+    casefile.adjudication = FindingAdjudication.model_validate(
+        {
+            "stale": False,
+            "duplicate_of": None,
+            "false_positive": False,
+            "already_fixed": False,
+            "rationale": "fixture adjudication",
+            "confidence": 0.85,
+        }
+    )
+    casefile.risk = RiskClassification.model_validate(
+        {
+            "risk_level": "medium",
+            "impact": "fixture risk",
+            "automation_eligible": True,
+            "confidence": 0.8,
+            "rationale": "fixture risk",
+        }
+    )
+    casefile.remediation_plan = None
+    return casefile.model_dump(mode="json")
 
 
 async def run_eval(model_profile: str = "fake") -> dict:
@@ -16,9 +61,10 @@ async def run_eval(model_profile: str = "fake") -> dict:
     task = TaskSpec(
         run_id="eval-run",
         title="Evaluate Solutions Architect",
-        objective="Run deterministic isolated evaluation for Solutions Architect.",
+        objective="Run deterministic casefile evaluation for Solutions Architect.",
         capability="solutions_architect",
         agent_id="solutions_architect",
+        constraints={"casefile": _fixture_casefile()},
     )
     result = await agent.run(
         AgentInvocation(
@@ -29,9 +75,11 @@ async def run_eval(model_profile: str = "fake") -> dict:
             idempotency_key=str(uuid4()),
         )
     )
+    casefile = result.artifact_refs[0].metadata["casefile"] if result.artifact_refs else {}
+    passed = result.state == "completed" and casefile.get("remediation_plan") is not None
     return {
         "agent_id": "solutions_architect",
-        "passed": result.state == "completed",
+        "passed": passed,
         "result": result.model_dump(mode="json"),
     }
 
