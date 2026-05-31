@@ -14,3 +14,14 @@ When working in this repository, preserve the core boundaries:
 6. Run `just check` before finalizing changes.
 
 Prefer small, testable functions and update documentation when changing architecture or developer workflow.
+
+
+## Harness runtime conventions
+
+When changing agent execution, preserve the separation between Temporal and the agent runtime. Temporal owns durable workflow state, retries, Signals, Updates, approvals, and mission lifecycle. Agent modules may use the Strands-compatible runtime adapter through `BaseAgent`, but must continue returning `AgentResult` contracts.
+
+Use `build_temporal_client()` instead of calling `Client.connect()` directly so Pydantic data conversion and future tracing configuration remain centralized. Use `ToolPolicy` and `ToolContext` before adding any write-capable tool path. High-risk tasks, write tools, and destructive operations must require an approved `ApprovalState`.
+
+New workflow-visible state should be represented as contracts first, then tested in isolation. For agent durability, prefer `AgentCheckpoint` and the checkpoint store rather than ad hoc files. For run-level auditability, use `RunArtifact` records for plans, context packs, execution logs, verification records, and decision records.
+
+Evaluation changes should support repeated trials and pass^k semantics. Add golden, edge, adversarial, and regression cases where possible, and keep the deterministic `fake` model path passing before testing local or remote models.

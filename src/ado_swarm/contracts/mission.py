@@ -6,6 +6,9 @@ from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from ado_swarm.contracts.artifacts import RunArtifact
+from ado_swarm.contracts.budget import BudgetPolicy, BudgetUsage
+from ado_swarm.contracts.checkpoints import AgentCheckpoint
 from ado_swarm.contracts.events import (
     ArtifactRef,
     MemoryRef,
@@ -31,6 +34,7 @@ class TaskSpec(BaseModel):
     acceptance_criteria: list[str] = Field(default_factory=list)
     risk_level: RiskLevel = RiskLevel.LOW
     allowed_tools: list[str] = Field(default_factory=list)
+    budget_policy: BudgetPolicy = Field(default_factory=BudgetPolicy)
     max_attempts: int = 3
     timeout_seconds: int = 1800
 
@@ -61,6 +65,7 @@ class AgentInvocation(BaseModel):
     blackboard_refs: list[MemoryRef] = Field(default_factory=list)
     artifact_refs: list[ArtifactRef] = Field(default_factory=list)
     user_feedback: list[str] = Field(default_factory=list)
+    checkpoint_resume: AgentCheckpoint | None = None
 
 
 class AgentResult(BaseModel):
@@ -78,6 +83,9 @@ class AgentResult(BaseModel):
     requires_approval: bool = False
     activated_skills: list[str] = Field(default_factory=list)
     requested_tools: list[str] = Field(default_factory=list)
+    checkpoints: list[AgentCheckpoint] = Field(default_factory=list)
+    budget_usage: BudgetUsage = Field(default_factory=BudgetUsage)
+    telemetry: dict[str, Any] = Field(default_factory=dict)
     error_type: str | None = None
     error_message: str | None = None
 
@@ -92,5 +100,7 @@ class RunSnapshot(BaseModel):
     task_states: dict[str, TaskState] = Field(default_factory=dict)
     latest_events: list[TaskEvent] = Field(default_factory=list)
     artifact_refs: list[ArtifactRef] = Field(default_factory=list)
+    run_artifacts: list[RunArtifact] = Field(default_factory=list)
+    approvals: dict[str, str] = Field(default_factory=dict)
     blocked_reason: str | None = None
     updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))

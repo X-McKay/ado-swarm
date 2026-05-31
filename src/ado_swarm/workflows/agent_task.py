@@ -7,6 +7,7 @@ from temporalio import workflow
 with workflow.unsafe.imports_passed_through():
     from ado_swarm.contracts.events import TaskState
     from ado_swarm.contracts.mission import AgentInvocation, AgentResult, TaskSpec
+    from ado_swarm.temporal.policies import ActivityRetryProfile, retry_policy
 
 
 @workflow.defn(name="AgentTaskWorkflow")
@@ -24,6 +25,7 @@ class AgentTaskWorkflow:
             "run_agent",
             args=[invocation],
             start_to_close_timeout=timedelta(seconds=task.timeout_seconds),
+            retry_policy=retry_policy(ActivityRetryProfile.MODEL),
         )
         result = AgentResult.model_validate(raw_result)
         if result.state != TaskState.COMPLETED:
