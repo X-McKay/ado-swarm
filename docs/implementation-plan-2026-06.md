@@ -17,13 +17,26 @@ The unifying frame from harness engineering: **Agent = Model + Harness.** Tempor
 
 ---
 
-## 2. Thesis & non-negotiables
+## 2. Vocabulary & non-negotiables
 
-1. **Temporal owns orchestration; Strands owns single-agent reasoning.** Each specialist agent is a Strands `Agent` executed *inside a Temporal activity*. Temporal's `SupervisorWorkflow` remains the DAG/topology and the human-in-the-loop authority. We do **not** adopt Strands' own `Swarm`/`Graph` multi-agent orchestration for cross-agent flow (it would duplicate and fight Temporal's durability). Strands `Swarm`/`Graph` stay available for a *tightly-coupled sub-team inside one activity* if ever needed (§8-D1).
-2. **Policy is structural, not prose.** Tool access is enforced at the Strands `BeforeToolCallEvent` hook (a real interception point), mapped to a PEP/PDP decision `ALLOW | DENY | REQUIRE_APPROVAL`. The `allowed-tools` field in `SKILL.md` is *documentation only* — Strands explicitly does not enforce it (§7.3). This directly fixes review §2.3.
-3. **Verification is a governor, not advice.** Agent output is accepted only when it passes deterministic checks (schema validity, casefile invariants, and — for remediation — tests/linters in a sandbox). The model never self-certifies. This is the harness "hard environmental signal."
-4. **Determinism stays in the workflow; all I/O and model calls stay in activities.** No wall-clock/uuid/model calls in workflow code (fixes review §5).
-5. **Everything is eval-gated.** Golden casefiles + `pass^k`, deterministic assertions before any LLM-judge, the `fake` model keeps CI hermetic, a real local model (Ollama) runs in a nightly quality gate.
+### 2.0 Canonical vocabulary (Simon Willison) — the core rule
+This project adopts Simon Willison's definitions as its **canonical vocabulary**, enforced in code review, scaffolding, linting, and docs (§6.4):
+
+- **Agent** — *"tools in a loop to achieve a goal."* Software that calls an LLM with a prompt **and a set of tool definitions**, executes whichever tools the model requests, and feeds the results back into the model in a **bounded loop** until a stopping condition is met. **An agent without a model is not an agent.**
+- **Tool** — an executable function/capability the harness provides to the agent: the agent's *hands*. Deterministic, typed, testable in isolation.
+- **Skill** — *packaged expertise* (domain knowledge, instructions, behavioral patterns) loaded into the agent's context to shape *how* it approaches a problem (Anthropic "Agent Skills" / `SKILL.md` format). A skill is not code and takes no action; it is context.
+
+> **THE CORE RULE (load-bearing):** **Every agent uses a model.** If a unit of work is deterministic, it is a **tool** (or a harness verification step), **never** an agent. We do not ship "deterministic agents." This resolves the old review distinction between "stub agents" and "richer agents": both were anti-patterns — the former did nothing real, the latter were deterministic Python masquerading as agents. Going forward, an `Agent` = model + tools (+ skills) in a loop; the deterministic logic those agents used moves into the **tool catalog** (§5 Phase 1).
+
+This rule is the lens for the whole plan: Phase 1 turns the deterministic casefile-enrichment code into tools and makes every specialist a genuine tools-in-a-loop agent; the DX work (§6.4, Phase 3) makes the vocabulary impossible to drift from.
+
+### 2.1 Non-negotiables
+1. **Every agent is a model running tools in a loop; deterministic work is a tool.** (§2.0). Each agent must declare a model, ≥1 tool, and its skills; a model-less "agent" fails lint.
+2. **Temporal owns orchestration; Strands owns single-agent reasoning.** Each specialist agent is a Strands `Agent` executed *inside a Temporal activity*. Temporal's `SupervisorWorkflow` remains the DAG/topology and the human-in-the-loop authority. We do **not** adopt Strands' own `Swarm`/`Graph` multi-agent orchestration for cross-agent flow (it would duplicate and fight Temporal's durability). Strands `Swarm`/`Graph` stay available for a *tightly-coupled sub-team inside one activity* if ever needed (§8-D1).
+3. **Policy is structural, not prose.** Tool access is enforced at the Strands `BeforeToolCallEvent` hook (a real interception point), mapped to a PEP/PDP decision `ALLOW | DENY | REQUIRE_APPROVAL`. The `allowed-tools` field in `SKILL.md` is *documentation only* — Strands explicitly does not enforce it (§7.3). This directly fixes review §2.3.
+4. **Verification is a governor, not advice.** Agent output is accepted only when it passes deterministic checks (schema validity, casefile invariants, and — for remediation — tests/linters in a sandbox). The model never self-certifies. This is the harness "hard environmental signal." (Verification checks are harness steps/tools, not agents — per §2.0.)
+5. **Determinism stays in the workflow; all I/O and model calls stay in activities.** No wall-clock/uuid/model calls in workflow code (fixes review §5).
+6. **Everything is eval-gated.** Golden casefiles + `pass^k`, deterministic assertions before any LLM-judge, the `fake` model keeps CI hermetic, a real local model (Ollama) runs in a nightly quality gate.
 
 ---
 
@@ -104,14 +117,19 @@ Each phase leaves the repo green (`just check`) and shippable. Effort is rough (
 
 Pick the slice **`ticket_analyst → repo_analyst → risk_auditor`** (covers normalize → evidence-with-a-tool → classify).
 
-1. **Strands model factory + FakeModel** (§4, §7.2). `ModelProfile` → `strands.models.Model`. `FakeModel` returns deterministic, templated structured output so CI stays hermetic and offline.
+0. **Extract the tool catalog & audit the agents (the §2.0 rule made concrete).** Today's deterministic "enrichment" code is exactly the deterministic work that must become **tools**, not agents:
+   - `ticket_analyst/normalization.py` (279 LOC deterministic normalizer) → a `normalize_finding(issue) -> NormalizedFinding` **tool**. The *agent* handles the messy/ambiguous issues the deterministic normalizer can't and decides when to call it. **This is the canonical example of the rule** — keep the well-tested deterministic logic, demote it from "the agent" to "a tool the agent calls."
+   - `repo_analyst` file-existence/repo-resolution logic → `repository_resolve`, `verify_file_location`, `get_git_history` tools.
+   - `risk_auditor`/`security_reviewer` heuristics → `score_severity`, `fingerprint_finding`, `lookup_duplicate(knowledge)` tools.
+   Land these in a **tool registry** (`tools/catalog/`) of `@tool`-decorated functions with typed I/O, each unit-testable in isolation (deterministic tools are the *easy* test surface). Then **audit all 9 agents**: each must have a genuine model-reasoning job and declare model + ≥1 tool + skills; any that are pure deterministic aggregation are demoted to tools or harness steps (candidates flagged in §8-D2). The two anti-patterns from the review — canned-text "stub agents" (`qa_lead`/`data_analyst`/`software_engineer`) and deterministic "richer agents" — are both eliminated here.
+1. **Strands model factory + FakeModel** (§4, §7.2). `ModelProfile` → `strands.models.Model`. `FakeModel` returns deterministic, templated structured output so CI stays hermetic and offline (and keeps the now model-driven agents testable without a server).
 2. **`StrandsAgentRuntime` rewrite.** Build a real `Agent(model=…, tools=…, plugins=[AgentSkills(...)], hooks=[ToolPolicyHook, BudgetHook, TelemetryHook])`. Remove the silent bare-`except` fallback (review §2.1, §5) — failures must surface as typed errors.
 3. **Skills become real.** Point `AgentSkills` at `src/ado_swarm/skills/` (its `SKILL.md` format already matches Strands' expected frontmatter — `name`, `description`, `allowed-tools`; §7.4). Drive *which* skills are available per agent from `metadata.yaml` (single source of truth — fixes review §2.2 metadata/code drift), and switch packs per phase via `set_available_skills`. Record `get_activated_skills()` into `AgentResult.activated_skills` and the audit trail. **This alone makes the 26 skills load-bearing instead of decorative.**
 4. **Tool policy via hook.** Convert `tools/policy.py` into a Strands `HookProvider` on `BeforeToolCallEvent` that consults `ToolContext` (agent id, phase, risk, approval state, repo allowlist) and returns `ALLOW | DENY | REQUIRE_APPROVAL`; `DENY`/`REQUIRE_APPROVAL` set `event.cancel_tool` (§7.3). Wrap the existing provider calls (`provider.get_file`, `provider.get_issue`) as `@tool` functions so they flow through the gate — fixes the ungated reads in review §2.3 and ADR-0007.
-5. **Structured output for casefile sections.** Each specialist runs its skill-driven reasoning loop, then emits its typed section via `agent.structured_output(RepositoryEvidence | FindingAdjudication | RiskClassification, prompt)` (§7.5). The existing deterministic logic becomes the **verifier/fallback**, not the producer. (Gotcha: `structured_output` bypasses tool hooks — do tool-using work in the `agent(...)` loop *first*, then extract the typed section; §7.5.)
+5. **Structured output for casefile sections.** Each specialist runs its skill-driven, tool-using reasoning loop (calling the catalog tools from step 0), then emits its typed section via `agent.structured_output(RepositoryEvidence | FindingAdjudication | RiskClassification, prompt)` (§7.5). The deterministic catalog tools are the agent's *hands and verifier* — the model decides, the tools compute precisely and the section is schema-checked as a governor (§6.2). (Gotcha: `structured_output` bypasses tool hooks — do tool-using work in the `agent(...)` loop *first*, then extract the typed section; §7.5.)
 6. **Golden evals that can fail.** 8–12 golden casefiles per slice agent with expected dispositions; deterministic assertions; `pass^k` (k≥3) on the **real** model (Ollama) in a nightly job, `fake` in CI. Wire the existing `pass_k` plumbing (`cli/main.py`).
 
-**Acceptance:** with `MODEL_PROVIDER=ollama`, the three-agent slice produces casefile sections via real model reasoning; a denied tool is provably blocked by the hook (a test asserts `cancel_tool` fired); skills show up in `activated_skills`; golden evals pass `pass^3` on the local model and are deterministic on `fake`.
+**Acceptance:** with `MODEL_PROVIDER=ollama`, every slice agent makes ≥1 real model call **and** ≥1 tool call (no model-less agents; the former `normalization.py` now runs as the `normalize_finding` tool); a denied tool is provably blocked by the hook (a test asserts `cancel_tool` fired); skills show up in `activated_skills`; golden evals pass `pass^3` on the local model and are deterministic on `fake`. Catalog tools have isolated unit tests.
 
 ### Phase 2 — Temporal correctness & real approvals (≈1 wk)
 *Goal: make the governance layer real (review §2.4, §5).*
@@ -127,7 +145,7 @@ Pick the slice **`ticket_analyst → repo_analyst → risk_auditor`** (covers no
 ### Phase 3 — Collapse redundancy & developer experience (≈1 wk)
 *Goal: delete ~600–800 LOC and make new agents/skills a one-file affair (review §4, §9).*
 
-- **`CasefileAgent(BaseAgent)`** base owning the `casefile_from_invocation → guard → enrich → audit → casefile_artifact` skeleton; each specialist implements only `enrich(casefile) -> section` (review §4, ~120 LOC).
+- **`CasefileAgent(BaseAgent)`** base owning the `casefile_from_invocation → guard → run-agent-loop → audit → casefile_artifact` skeleton. Per §2.0 the per-agent surface is **declarative, not deterministic code**: each specialist declares its `tools`, `skills`/pack, the structured-output `section_model`, and a prompt template; the base runs the Strands agent loop and writes the typed section. (Contrast the review's original "abstract `enrich(casefile)->section`" idea, which assumed deterministic producers — that would violate the core rule; the deterministic parts now live in the tool catalog from Phase 1.)
 - **One parametrized eval harness** in `eval_support` driven by `metadata.eval_entrypoint` + a per-agent `input_builder`/`assertion`; the 9 `eval.py` files shrink to a fixture + an assertion (review §4, ~400 LOC). Single shared `_fixture_casefile()`.
 - **Skill catalog from data.** Generate `SKILL.md` from one YAML registry + template (review §4, ~600 MD LOC), with a pre-commit/`PostToolUse` hook to keep them in sync. Per-skill `allowed-tools` becomes real per-phase data (today all 26 are identical).
 - **Isolated agent/skill harness (explicit ask, review §9.4):**
@@ -174,6 +192,13 @@ This implements the harness "5-layer permission / PEP-PDP / ALLOW-DENY-REQUIRE_A
 
 ### 6.3 Observability — OTel GenAI semconv end-to-end
 Strands `StrandsTelemetry().setup_otlp_exporter()` + Temporal `temporalio.contrib.opentelemetry.TracingInterceptor`, GenAI semantic-convention attributes, trace-context propagation across every swarm hop. Treat traces as queryable data for debugging multi-turn failures and building evaluators (Langfuse/Phoenix/Braintrust optional backends).
+
+### 6.4 Vocabulary as a guardrail (Agent / Tool / Skill) — steering future development
+The §2.0 definitions must be *enforced and taught*, not just stated, so the codebase can't drift back into "deterministic agents":
+- **Canonical doc** (`docs/concepts/agents-tools-skills.md`): the Willison definitions, the core rule, the anti-patterns we removed, and a decision flowchart ("Is it deterministic? → tool. Does it need a model to decide? → agent. Is it context/instructions? → skill."), with a worked example (`normalize_finding` tool vs `ticket_analyst` agent). Linked from `README.md` and `CONTRIBUTING`.
+- **Registry validation / lint** (extends `validate_packs`): every `metadata.yaml` agent must declare a model profile, ≥1 tool, and skills; CI **fails** on a model-less agent or an agent whose `run()` makes no model call. A tool must be a typed `@tool` with a unit test; a skill must be a valid `SKILL.md`.
+- **Scaffolders teach the pattern:** `just new-agent` emits a model-driven tools-in-a-loop agent (never a deterministic stub); `just new-tool` emits a typed `@tool` + test; `just new-skill` emits a `SKILL.md` from the registry. The `ado-swarm-add-agent` Claude skill and the updated `ado-swarm-development` skill state the three definitions and the core rule up front.
+- **Review checklist** item: "New agent? Justify the model-reasoning job. Deterministic? Make it a tool." This is the cheapest, highest-leverage steering mechanism.
 
 ---
 
@@ -272,7 +297,7 @@ async with await WorkflowEnvironment.start_time_skipping() as env:
 ## 8. Open decisions (for discussion)
 
 - **D1 — Multi-agent ownership.** *Recommended:* Temporal owns cross-agent orchestration; Strands agents run one-per-activity. Alternative: use Strands `Swarm`/`Graph` for the whole pipeline inside fewer activities (simpler agent handoffs, but cedes durability/visibility/approval granularity to Strands). *Recommendation: Temporal-owned.*
-- **D2 — Reasoning vs determinism per agent.** Which specialists truly need a model vs. stay deterministic? *Recommended:* `ticket_analyst` (normalize messy issues), `security_reviewer` (adjudication), `risk_auditor` (scoring), `solutions_architect` (planning) are model-driven; `repo_analyst` stays mostly deterministic + tools; `data_analyst`/`qa_lead` deterministic. Discuss per-agent.
+- **D2 — Agent vs tool demotion (the §2.0 rule applied per unit).** *Decided:* **all agents use a model** (no deterministic agents). The remaining open question is which of today's 9 "agents" are genuine tools-in-a-loop agents vs. should be **demoted to tools or harness steps**. *Recommended:* keep as model-driven agents — `ticket_analyst` (normalize messy/ambiguous issues), `repo_analyst` (decide what evidence to gather, call repo tools), `security_reviewer` (adjudicate stale/dup/false-positive), `risk_auditor` (score risk/eligibility), `solutions_architect` (plan), `test_engineer` (validation strategy). *Demote/justify:* `qa_lead` (intake coordination — may be a workflow/harness step, not an agent), `data_analyst` (analytics — agent only if it genuinely reasons over patterns; otherwise a reporting tool/query), `software_engineer` (out of scope this plan — §8-D7). Confirm the keep/demote list per agent.
 - **D3 — Local model target.** Ollama model for the nightly quality gate (e.g. a small Llama/Qwen). Tradeoff: bigger = better evals, slower CI. *Recommended:* a small instruct model for `pass^k`, Bedrock for staging.
 - **D4 — Memory backend.** Graphiti+Neo4j (already scaffolded) vs. add mem0/Zep for cross-session recall. *Recommended:* finish Graphiti first (it's in the plan/ADR), revisit mem0 only if recall quality is insufficient.
 - **D5 — Migrations tool.** Alembic (heavier, autogenerate) vs. yoyo/`schema_migrations`-table (lighter). *Recommended:* lightweight version table + per-file transactions unless we need autogenerate.
