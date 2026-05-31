@@ -1,101 +1,76 @@
 from __future__ import annotations
 
-import argparse
-import asyncio
 import json
 from pathlib import Path
-from uuid import uuid4
 
-from ado_swarm.agents.eval_support import build_eval_model_gateway
-from ado_swarm.agents.solutions_architect.main import build_agent
+from ado_swarm.agents.eval_support import eval_cli, eval_invocation, run_agent_eval
 from ado_swarm.agents.ticket_analyst.normalization import build_casefile
-from ado_swarm.contracts.casefile import (
-    FindingAdjudication,
-    RepositoryEvidence,
-    RiskClassification,
-)
-from ado_swarm.contracts.mission import AgentInvocation, TaskSpec
+from ado_swarm.contracts.casefile import RemediationPlan
+from ado_swarm.contracts.events import TaskState
+from ado_swarm.contracts.mission import AgentResult
 from ado_swarm.contracts.source_provider import SourceIssue
+from ado_swarm.model_gateway.strands_models import FakeModel, ScriptStep, ToolCall
 
-
-def _fixture_casefile() -> dict:
-    issue = SourceIssue.model_validate(
-        json.loads(Path("tests/fixtures/source_issues/codeql_sast.json").read_text())
-    )
-    casefile = build_casefile("eval-run", issue)
-    casefile.repository_evidence = RepositoryEvidence.model_validate(
-        {
-            "repository": casefile.source_issue.repository.model_dump(mode="json")
-            if casefile.source_issue.repository
-            else None,
-            "ref": "main",
-            "file_exists": True,
-            "evidence": ["fixture repository evidence"],
-        }
-    )
-    casefile.adjudication = FindingAdjudication.model_validate(
-        {
-            "stale": False,
-            "duplicate_of": None,
-            "false_positive": False,
-            "already_fixed": False,
-            "rationale": "fixture adjudication",
-            "confidence": 0.85,
-        }
-    )
-    casefile.risk = RiskClassification.model_validate(
-        {
-            "risk_level": "medium",
-            "impact": "fixture risk",
-            "automation_eligible": True,
-            "confidence": 0.8,
-            "rationale": "fixture risk",
-        }
-    )
-    casefile.remediation_plan = None
-    return casefile.model_dump(mode="json")
+FIXTURE = Path(__file__).resolve().parents[4] / "tests/fixtures/source_issues/codeql_sast.json"
 
 
 async def run_eval(model_profile: str = "fake") -> dict:
-    agent = build_agent(build_eval_model_gateway(model_profile))
-    task = TaskSpec(
-        run_id="eval-run",
-        title="Evaluate Solutions Architect",
-        objective="Run deterministic casefile evaluation for Solutions Architect.",
-        capability="solutions_architect",
-        agent_id="solutions_architect",
-        constraints={"casefile": _fixture_casefile()},
+    issue = SourceIssue.model_validate(json.loads(FIXTURE.read_text()))
+    casefile = build_casefile("eval-run", issue)
+    finding = casefile.normalized_finding
+    if finding is None:
+        raise ValueError("fixture casefile is missing a normalized finding")
+    finding_dict = finding.model_dump(mode="json")
+    expected = RemediationPlan(
+        strategy="localized_code_fix",
+        change_boundary=f"single finding {finding.finding_id}",
+        steps=[
+            "Inspect the affected file around the reported location.",
+            "Apply the smallest code change that removes the unsafe data flow.",
+            "Run targeted security and unit tests before preparing review output.",
+        ],
+        requires_human_approval=True,
     )
-    result = await agent.run(
-        AgentInvocation(
-            run_id="eval-run",
-            task=task,
-            context_id="eval",
-            plan_version=1,
-            idempotency_key=str(uuid4()),
+    fake = FakeModel(
+        script=[
+            ScriptStep(
+                tool_calls=[
+                    ToolCall(name="propose_remediation_strategy", input={"finding": finding_dict})
+                ]
+            ),
+            ScriptStep(text="prepared the remediation plan"),
+        ],
+        structured_outputs={RemediationPlan: expected},
+    )
+    invocation = eval_invocation(
+        "solutions_architect",
+        objective="Produce a bounded remediation plan.",
+        constraints={"casefile": casefile.model_dump(mode="json")},
+    )
+
+    def assertion(result: AgentResult) -> bool:
+        if result.state != TaskState.COMPLETED or not result.artifact_refs:
+            return False
+        casefile_out = result.artifact_refs[0].metadata["casefile"]
+        plan = casefile_out.get("remediation_plan")
+        audit = casefile_out.get("audit", {}).get("solutions_architect", {})
+        return (
+            bool(plan)
+            and bool(plan.get("steps"))
+            and "propose_remediation_strategy" in audit.get("tools_allowed", [])
         )
+
+    return await run_agent_eval(
+        "solutions_architect",
+        invocation=invocation,
+        model_profile=model_profile,
+        fake_model=fake,
+        assertion=assertion,
     )
-    casefile = result.artifact_refs[0].metadata["casefile"] if result.artifact_refs else {}
-    passed = result.state == "completed" and casefile.get("remediation_plan") is not None
-    return {
-        "agent_id": "solutions_architect",
-        "passed": passed,
-        "result": result.model_dump(mode="json"),
-    }
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--model-profile", default="fake")
-    parser.add_argument("--output")
-    args = parser.parse_args()
-    payload = asyncio.run(run_eval(args.model_profile))
-    if args.output:
-        path = Path(args.output)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(payload, indent=2))
-    else:
-        print(json.dumps(payload, indent=2))
+    eval_cli(run_eval)
 
 
 if __name__ == "__main__":

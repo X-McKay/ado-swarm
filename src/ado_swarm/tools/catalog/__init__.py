@@ -9,6 +9,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from ado_swarm.tools.catalog.adjudication import adjudication_signals
+from ado_swarm.tools.catalog.remediation import propose_remediation_strategy
 from ado_swarm.tools.catalog.repository import resolve_repository, verify_file_location
 from ado_swarm.tools.catalog.risk import score_severity
 from ado_swarm.tools.catalog.triage import normalize_finding
@@ -18,6 +20,8 @@ CATALOG: dict[str, Any] = {
     "resolve_repository": resolve_repository,
     "verify_file_location": verify_file_location,
     "score_severity": score_severity,
+    "adjudication_signals": adjudication_signals,
+    "propose_remediation_strategy": propose_remediation_strategy,
 }
 
 

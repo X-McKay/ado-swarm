@@ -10,10 +10,11 @@ skill_packs:
   - triage-readonly
 skills:
   - stale-finding-adjudication
+  - duplicate-finding-adjudication
+  - false-positive-evidence-review
 tools:
   allowed:
-    - casefile_read
-    - blackboard_append
+    - adjudication_signals
   denied:
     - provider_create_draft_pr
     - git_write
