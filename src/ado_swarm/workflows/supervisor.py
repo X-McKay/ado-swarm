@@ -5,8 +5,8 @@ from datetime import timedelta
 from temporalio import workflow
 
 with workflow.unsafe.imports_passed_through():
-    from ado_swarm.contracts.events import RunStatus, TaskState
-    from ado_swarm.contracts.mission import PlanVersion, RunSnapshot
+    from ado_swarm.contracts.events import ArtifactRef, RunStatus, TaskState
+    from ado_swarm.contracts.mission import AgentResult, PlanVersion, RunSnapshot
     from ado_swarm.domain.plan_validation import validate_plan
     from ado_swarm.runtime.artifacts import plan_artifact
     from ado_swarm.temporal.policies import ActivityRetryProfile, retry_policy
@@ -25,19 +25,21 @@ class SupervisorWorkflow:
     @workflow.run
     async def run(self, run_id: str, goal: str) -> RunSnapshot:
         self.snapshot = RunSnapshot(run_id=run_id, status=RunStatus.PLANNING, goal=goal)
-        plan = await workflow.execute_activity(
+        raw_plan = await workflow.execute_activity(
             "plan_mission",
             args=[run_id, goal],
             start_to_close_timeout=timedelta(seconds=30),
             retry_policy=retry_policy(ActivityRetryProfile.DEFAULT),
         )
-        plan = PlanVersion.model_validate(plan)
+        plan = PlanVersion.model_validate(raw_plan)
         validate_plan(plan)
         self.snapshot.current_plan_version = plan.version
         self.snapshot.run_artifacts.append(plan_artifact(plan))
         self.snapshot.status = RunStatus.RUNNING
         completed: set[str] = set()
         pending = {task.task_id: task for task in plan.tasks}
+        artifacts_by_task: dict[str, list[ArtifactRef]] = {}
+
         while pending:
             await workflow.wait_condition(lambda: not self.paused or self.cancel_requested)
             if self.cancel_requested:
@@ -58,14 +60,24 @@ class SupervisorWorkflow:
                 self.snapshot.blocked_reason = "Plan has unresolved dependencies after validation."
                 return self.snapshot
             for task in runnable:
+                dependency_artifacts: list[ArtifactRef] = []
+                for dependency_id in task.depends_on:
+                    dependency_artifacts.extend(artifacts_by_task.get(dependency_id, []))
+                task_for_run = task
+                if dependency_artifacts:
+                    task_for_run = task.model_copy(
+                        update={"input_refs": [*task.input_refs, *dependency_artifacts]}
+                    )
                 self.snapshot.task_states[task.task_id] = TaskState.RUNNING
-                result = await workflow.execute_child_workflow(
+                raw_result = await workflow.execute_child_workflow(
                     AgentTaskWorkflow.run,
-                    args=[run_id, task, plan.version],
+                    args=[run_id, task_for_run, plan.version],
                     id=f"agent-task:{run_id}:{task.task_id}",
                 )
+                result = AgentResult.model_validate(raw_result)
                 self.snapshot.task_states[task.task_id] = result.state
                 self.snapshot.artifact_refs.extend(result.artifact_refs)
+                artifacts_by_task[task.task_id] = result.artifact_refs
                 if result.requires_approval:
                     self.snapshot.status = RunStatus.WAITING_FOR_APPROVAL
                     self.snapshot.blocked_reason = result.summary

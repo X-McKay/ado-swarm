@@ -30,3 +30,6 @@ Evaluation changes should support repeated trials and pass^k semantics. Add gold
 ## Richer agent pipeline
 
 For read-only security workflow changes, use `SecurityCasefile` as the handoff object. Agents should read a casefile from task constraints or artifact metadata with `casefile_from_invocation()` and emit updated state with `casefile_artifact()`. Each specialist owns a specific casefile field: repository evidence, adjudication, risk, remediation plan, or validation audit. Do not introduce prompt-only handoffs when a typed field can represent the state.
+
+
+The default Temporal mission planner executes the full casefile pipeline in this order: `ticket_analyst`, `repo_analyst`, `security_reviewer`, `risk_auditor`, `solutions_architect`, and `test_engineer`. When modifying planner or workflow behavior, preserve dependency artifact propagation: downstream tasks should receive upstream casefile artifacts through `TaskSpec.input_refs`, and workflows should avoid storing mutable casefile state outside typed artifacts.

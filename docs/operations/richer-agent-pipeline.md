@@ -18,3 +18,19 @@ Agents accept a casefile from `TaskSpec.constraints["casefile"]`, a source issue
 ## Safety posture
 
 The current pipeline does not modify repositories, source-provider tickets, branches, or pull requests. Risky or write-capable work remains behind `ToolPolicy`, approval state, and future sandboxed remediation flows.
+
+
+## Temporal execution model
+
+The default mission planner now emits the full six-agent linear DAG. `ticket_analyst` receives the configured source provider's initial source issue, and each downstream task receives the artifact references emitted by its dependency through `TaskSpec.input_refs`. The supervisor workflow also records all emitted casefile artifacts in `RunSnapshot.artifact_refs`, so operators can inspect the progressive casefile state across the mission.
+
+| Stage | Dependency | Handoff mechanism |
+|---|---|---|
+| `ticket_analyst` | None | `constraints.source_issue` from the configured source provider. |
+| `repo_analyst` | `ticket_analyst` | Casefile artifact in `input_refs`. |
+| `security_reviewer` | `repo_analyst` | Enriched casefile artifact in `input_refs`. |
+| `risk_auditor` | `security_reviewer` | Adjudicated casefile artifact in `input_refs`. |
+| `solutions_architect` | `risk_auditor` | Risk-classified casefile artifact in `input_refs`. |
+| `test_engineer` | `solutions_architect` | Remediation-plan casefile artifact in `input_refs`. |
+
+This execution model keeps the workflow deterministic while still preserving a complete audit trail of each agent's state transition. Provider reads remain inside activities or agent execution, and write-capable operations remain disabled unless `ToolPolicy` and approval state explicitly allow them.
