@@ -1,0 +1,314 @@
+# ado-swarm Implementation Plan v2 — "From Swarm Costume to Durable Harness"
+
+**Date:** 2026-05-31
+**Author:** engineering review
+**Inputs:** `docs/codebase-review-2026-05.md` (the current-state review), plus current-API research on the **Strands Agents SDK `1.41.0`**, the **Temporal Python SDK `temporalio 1.27.2`**, and the *harness-engineering* body of practice (`ai-boost/awesome-harness-engineering`).
+**Status:** Draft for review & discussion. Recommendations are made throughout; genuine forks are collected in **§8 Open decisions**.
+
+---
+
+## 1. How to read this
+
+The review (`codebase-review-2026-05.md`) established the diagnosis: the contracts/scaffold are sound, but the three headline capabilities — *agents reason with a model*, *skills are progressively disclosed*, *tools are policy-gated* — and approvals **are not wired into the execution path** (review §2). The whole read-only triage pipeline is deterministic Python (review §2.1, sharpened by ADR-0007).
+
+This plan turns that diagnosis into a buildable sequence, grounded in the **actual** current SDK APIs (verified by package introspection, not stale blog posts — see §7). It is organized as five phases (§5) with explicit acceptance gates (§9), three cross-cutting tracks (§6: policy, evals, observability), and a decisions list (§8).
+
+The unifying frame from harness engineering: **Agent = Model + Harness.** Temporal is the *durable harness substrate* (loop, state, retries, human-in-the-loop, observability); Strands is the *cognitive layer* (model + tools + skills + structured output). We are currently shipping the harness with the cognitive layer stubbed out. This plan connects them.
+
+---
+
+## 2. Thesis & non-negotiables
+
+1. **Temporal owns orchestration; Strands owns single-agent reasoning.** Each specialist agent is a Strands `Agent` executed *inside a Temporal activity*. Temporal's `SupervisorWorkflow` remains the DAG/topology and the human-in-the-loop authority. We do **not** adopt Strands' own `Swarm`/`Graph` multi-agent orchestration for cross-agent flow (it would duplicate and fight Temporal's durability). Strands `Swarm`/`Graph` stay available for a *tightly-coupled sub-team inside one activity* if ever needed (§8-D1).
+2. **Policy is structural, not prose.** Tool access is enforced at the Strands `BeforeToolCallEvent` hook (a real interception point), mapped to a PEP/PDP decision `ALLOW | DENY | REQUIRE_APPROVAL`. The `allowed-tools` field in `SKILL.md` is *documentation only* — Strands explicitly does not enforce it (§7.3). This directly fixes review §2.3.
+3. **Verification is a governor, not advice.** Agent output is accepted only when it passes deterministic checks (schema validity, casefile invariants, and — for remediation — tests/linters in a sandbox). The model never self-certifies. This is the harness "hard environmental signal."
+4. **Determinism stays in the workflow; all I/O and model calls stay in activities.** No wall-clock/uuid/model calls in workflow code (fixes review §5).
+5. **Everything is eval-gated.** Golden casefiles + `pass^k`, deterministic assertions before any LLM-judge, the `fake` model keeps CI hermetic, a real local model (Ollama) runs in a nightly quality gate.
+
+---
+
+## 3. Target architecture
+
+```
+ Operator / API / CLI
+        │  start_mission(goal) · approve/reject (Update) · query snapshot
+        ▼
+┌─────────────────────────── Temporal (durable harness) ───────────────────────────┐
+│  SupervisorWorkflow            — owns plan DAG, scheduling, approvals, snapshot     │
+│    └─ AgentTaskWorkflow (child) — per task: route → run → verify → checkpoint       │
+│         └─ run_agent ACTIVITY  ─────────────────────────────┐                       │
+│         └─ verify ACTIVITY (sandbox tests/linters)          │                       │
+└────────────────────────────────────────────────────────────┼───────────────────────┘
+                                                              ▼
+                              ┌──────────────── Strands Agent (cognitive layer) ──────┐
+                              │  Agent(model, tools, plugins=[AgentSkills], hooks=[    │
+                              │        ToolPolicyHook, BudgetHook, TelemetryHook])     │
+                              │   • model  ← ModelProfile → BedrockModel/OpenAIModel/  │
+                              │             OllamaModel/LiteLLMModel/FakeModel         │
+                              │   • skills ← AgentSkills(src/ado_swarm/skills, strict) │
+                              │   • tools  ← casefile_read, provider_get_file, …       │
+                              │   • output ← agent.structured_output(SectionModel)     │
+                              │   • state  ← take_snapshot()/load_snapshot() across    │
+                              │             activity boundaries                        │
+                              └───────────────────────────────────────────────────────┘
+        Postgres (runs/plans/events/artifacts/budgets)   Neo4j+Graphiti (knowledge)
+        OTel (GenAI semconv spans: workflow→activity→agent→model/tool)
+```
+
+**Responsibility split (unchanged from ADR-0001, now made real):**
+
+| Concern | Owner | Mechanism |
+|---|---|---|
+| Plan/DAG, scheduling, retries, snapshot | Temporal workflow | `SupervisorWorkflow` (one plan representation — collapse the three from review §3.1) |
+| Human approval gates | Temporal **Update + validator** | `approve_task`/`reject_task` (not signals — §7.6) |
+| Model reasoning, tool calls, skill activation | Strands `Agent` in an activity | `run_agent` activity |
+| Tool authorization | Strands `BeforeToolCallEvent` hook | `ToolPolicyHook` → PEP/PDP |
+| Typed casefile sections | Strands structured output | `agent.structured_output(Section, prompt)` |
+| Cross-activity agent memory | Strands snapshots | `take_snapshot`/`load_snapshot` |
+| Knowledge/recall | Graphiti behind `KnowledgeStore` | real Neo4j adapter |
+| Verification | sandbox activity | tests/linters as governor |
+
+---
+
+## 4. Dependency & version decisions
+
+| Package | Current pin | New pin | Why |
+|---|---|---|---|
+| `strands-agents` | `>=1.0` | `>=1.41,<1.42` **`[openai,ollama,litellm,otel]`** | Event names, `AgentSkills` Python API, snapshots, structured output all stabilized at 1.41 (§7). Bedrock is built-in (no extra). |
+| `strands-agents-tools` | — | `>=0.7,<0.8` (optional) | Prebuilt tools if we want `shell`/`file_read` later; not required for read-only phase. |
+| `temporalio` | `>=1.7` | `>=1.27,<1.28` **`[opentelemetry]`** | Updates-with-validator stage API, typed search attributes, time-skipping test env (§7). |
+| Python | `>=3.11` | keep `>=3.11` | Strands needs `>=3.10`; fine. |
+| `respx` (dev) | present | keep | provider adapter tests. |
+
+**Model gateway decision:** retire the hand-rolled per-provider `ModelGateway.complete()` (review found it can't do tool-calling or token capture). Replace with a **`build_strands_model(profile: ModelProfile) -> strands.models.Model`** factory plus a deterministic **`FakeModel(Model)`** for `fake`. Agents talk to Strands, not to a bespoke completion shim. (See §7.2 for the exact constructor shapes — `base_url` lives in `client_args` for OpenAI-compatible, `host` for Ollama.)
+
+---
+
+## 5. Phases
+
+Each phase leaves the repo green (`just check`) and shippable. Effort is rough (1 engineer).
+
+### Phase 0 — Guardrails & test infrastructure (≈3–4 days)
+*Goal: stop the bleeding and make the rest testable. No behavior change.*
+
+- **CI** (`.github/workflows/ci.yml`) mirroring `just check` + `eval-agents --model-profile fake`; a separate `workflow_dispatch` job for Docker integration tests (review §9.1).
+- **SessionStart hook** (`.claude/settings.json`) running `uv sync --all-extras --dev` so web sessions are immediately runnable (review §9.2).
+- **Determinism fixes (review §5):** replace in-workflow `datetime.now`/`uuid4` defaults with values frozen in the planning activity; use `workflow.now()`/`workflow.uuid4()` where a workflow must generate them. Add a `tests/workflow/` suite using `WorkflowEnvironment.start_time_skipping()` (§7.3) that runs the supervisor end-to-end with mocked activities — this is the regression net for everything after.
+- **DI seams (review §6):** inject `CheckpointStore`/`ArtifactStore`/`Settings`/runtime into activities and `build_agent` instead of constructing inside; add in-memory artifact & checkpoint stores so agent/activity tests need no Postgres.
+- **Quick wins (review §11):** delete `temporal/errors.py` (or start raising them — see Phase 2), the no-op `if` in `agent_task.py`, `prompts.md` stubs (replaced in Phase 1), `event_payload`/`execution_artifact`; fix `activated_skills=self.skills[:1]`; resolve fixtures via `Path(__file__).parent`; add `-> SourceProvider` to the factory.
+
+**Acceptance:** CI green on PRs; `tests/workflow/` proves a mission runs, pauses on approval, cancels, and replays deterministically; agent unit tests run with zero external services.
+
+### Phase 1 — The real agent runtime (the existential slice) (≈1.5–2 wks)
+*Goal: one vertical slice genuinely reasons with a model, activates skills, and is tool-gated. This is the project's make-or-break (review §2, §10-P0).*
+
+Pick the slice **`ticket_analyst → repo_analyst → risk_auditor`** (covers normalize → evidence-with-a-tool → classify).
+
+1. **Strands model factory + FakeModel** (§4, §7.2). `ModelProfile` → `strands.models.Model`. `FakeModel` returns deterministic, templated structured output so CI stays hermetic and offline.
+2. **`StrandsAgentRuntime` rewrite.** Build a real `Agent(model=…, tools=…, plugins=[AgentSkills(...)], hooks=[ToolPolicyHook, BudgetHook, TelemetryHook])`. Remove the silent bare-`except` fallback (review §2.1, §5) — failures must surface as typed errors.
+3. **Skills become real.** Point `AgentSkills` at `src/ado_swarm/skills/` (its `SKILL.md` format already matches Strands' expected frontmatter — `name`, `description`, `allowed-tools`; §7.4). Drive *which* skills are available per agent from `metadata.yaml` (single source of truth — fixes review §2.2 metadata/code drift), and switch packs per phase via `set_available_skills`. Record `get_activated_skills()` into `AgentResult.activated_skills` and the audit trail. **This alone makes the 26 skills load-bearing instead of decorative.**
+4. **Tool policy via hook.** Convert `tools/policy.py` into a Strands `HookProvider` on `BeforeToolCallEvent` that consults `ToolContext` (agent id, phase, risk, approval state, repo allowlist) and returns `ALLOW | DENY | REQUIRE_APPROVAL`; `DENY`/`REQUIRE_APPROVAL` set `event.cancel_tool` (§7.3). Wrap the existing provider calls (`provider.get_file`, `provider.get_issue`) as `@tool` functions so they flow through the gate — fixes the ungated reads in review §2.3 and ADR-0007.
+5. **Structured output for casefile sections.** Each specialist runs its skill-driven reasoning loop, then emits its typed section via `agent.structured_output(RepositoryEvidence | FindingAdjudication | RiskClassification, prompt)` (§7.5). The existing deterministic logic becomes the **verifier/fallback**, not the producer. (Gotcha: `structured_output` bypasses tool hooks — do tool-using work in the `agent(...)` loop *first*, then extract the typed section; §7.5.)
+6. **Golden evals that can fail.** 8–12 golden casefiles per slice agent with expected dispositions; deterministic assertions; `pass^k` (k≥3) on the **real** model (Ollama) in a nightly job, `fake` in CI. Wire the existing `pass_k` plumbing (`cli/main.py`).
+
+**Acceptance:** with `MODEL_PROVIDER=ollama`, the three-agent slice produces casefile sections via real model reasoning; a denied tool is provably blocked by the hook (a test asserts `cancel_tool` fired); skills show up in `activated_skills`; golden evals pass `pass^3` on the local model and are deterministic on `fake`.
+
+### Phase 2 — Temporal correctness & real approvals (≈1 wk)
+*Goal: make the governance layer real (review §2.4, §5).*
+
+- **Approvals as Updates.** Convert `approve_task`/`reject_task` to drive scheduling: a `REQUIRE_APPROVAL` tool decision (or `AgentResult.requires_approval`) parks the task; the workflow `wait_condition`s on an approval recorded by a `@workflow.update` **with a validator** (reject bad approvals before they hit history; §7.6). On approval, re-dispatch the task with an approval token in `ToolContext` that flips the gate to `ALLOW`. Fixes "approvals collected but never gate" (review §2.4).
+- **Real "replan"** instead of terminal return: `request_replan` loops back to the planner activity rather than ending the run (review §5).
+- **Typed failures.** Agents/activities raise `ApplicationError(type="PolicyDenied"|"ApprovalRequired"|"ValidationFailed", non_retryable=True)`; wire these into `non_retryable_error_types` so the retry net is real, not decorative (review §3.4, §5). Honor `TaskSpec.max_attempts` in the child workflow retry policy (review §5).
+- **Concurrency.** Let independent runnable siblings run via `asyncio.gather` (latent today with the linear pipeline, but the scheduler is the bottleneck for any future fan-out; review §5).
+- **Collapse the three plan/DAG representations** (review §3.1) into one: have the planner emit the graph the runtime already understands (reuse `graph_templates`), delete the duplicate scheduler/`PIPELINE` constant.
+
+**Acceptance:** a `tests/workflow/` test drives a remediation task to `WAITING_FOR_APPROVAL`, sends an `approve_task` Update, and observes the gated tool now executing; a rejected approval is refused by the validator; a policy-denied tool fails the task as a non-retryable `ApplicationError`.
+
+### Phase 3 — Collapse redundancy & developer experience (≈1 wk)
+*Goal: delete ~600–800 LOC and make new agents/skills a one-file affair (review §4, §9).*
+
+- **`CasefileAgent(BaseAgent)`** base owning the `casefile_from_invocation → guard → enrich → audit → casefile_artifact` skeleton; each specialist implements only `enrich(casefile) -> section` (review §4, ~120 LOC).
+- **One parametrized eval harness** in `eval_support` driven by `metadata.eval_entrypoint` + a per-agent `input_builder`/`assertion`; the 9 `eval.py` files shrink to a fixture + an assertion (review §4, ~400 LOC). Single shared `_fixture_casefile()`.
+- **Skill catalog from data.** Generate `SKILL.md` from one YAML registry + template (review §4, ~600 MD LOC), with a pre-commit/`PostToolUse` hook to keep them in sync. Per-skill `allowed-tools` becomes real per-phase data (today all 26 are identical).
+- **Isolated agent/skill harness (explicit ask, review §9.4):**
+  - `ado-swarm agent run <id> --casefile fixture.json --model-profile ollama` — run one agent against a fixture, print the `AgentResult`, no Temporal/Postgres.
+  - `ado-swarm skill show <name>` / `skill lint` — inspect/validate a skill body in isolation.
+  - `just new-agent <name>` scaffolder; `just eval-agent-model`, `just skills-validate`, `just up-ollama`, `just agent-repl` (review §9.3).
+- **Agent-author Claude skill** (`.claude/skills/ado-swarm-add-agent/`) teaching the post-refactor one-file pattern; update the stale `ado-swarm-development` skill. Optional Claude Code **plugin** bundling skills + `/eval-agent` slash command (review §9.5–9.6).
+
+**Acceptance:** adding an agent = one `metadata.yaml` + one `enrich()` + one fixture; `skills-validate` catches drift; `just new-agent` produces a runnable, eval-passing stub; net LOC down ≥500.
+
+### Phase 4 — Productionization & memory (≈2–3 wks)
+*Goal: make it scale and remember (review §7, §8).*
+
+- **Resource handling (review §7):** `asyncpg.create_pool` injected into stores; providers as async context managers, cached/closed; real migration tool (Alembic/yoyo or a `schema_migrations` table + per-file transactions); pagination + 429/`Retry-After` in ADO/GitHub adapters; CWD-independent migration path.
+- **Budgets are real:** capture token usage from Strands (`EventLoopMetrics`/model usage) in a `BudgetHook`, write `budget_events` (the table exists with no writer), enforce `BudgetUsage` limits — fixes review §7 dead budget path.
+- **Observability (cross-cutting §6):** replace homegrown spans with Strands `StrandsTelemetry` OTLP + Temporal `TracingInterceptor`, emitting OTel **GenAI semantic-convention** spans; propagate trace context workflow→activity→agent→model/tool. Honest `/health` (review §7 misleading health).
+- **Real KnowledgeStore:** Graphiti/Neo4j behind the existing port (`add_casefile_episode`, `search_related_findings`, `record_outcome_episode`); use it for duplicate/stale adjudication recall — turning the `security_reviewer` from heuristics into evidence-backed memory lookups.
+- **Provider-contract hardening (review §8):** pin `external_id`/`ProviderMutationResult`/`add_pr_comment` semantics; enforce the `SourceProvider` `Protocol`; normalize `severity`/disposition enums; single-source the two approval booleans.
+
+**Acceptance:** load test shows pooled connections and no client leaks; `budget_events` populated and a budget breach halts a run; a trace spans operator→workflow→agent→model in the OTel backend; a duplicate finding is adjudicated via a Graphiti recall hit.
+
+---
+
+## 6. Cross-cutting tracks
+
+### 6.1 Policy model (PEP/PDP) — the harness "structural enforcement"
+A single decision function, consulted at the Strands tool boundary and mirrored in the workflow:
+```
+decide(tool, ToolContext) -> ALLOW | DENY | REQUIRE_APPROVAL
+  inputs: agent_id, phase, risk_tier, trust_zone, repo_allowlist,
+          provider_kind, approval_state, write?/destructive?
+```
+- `ALLOW` → tool runs.
+- `DENY` → `event.cancel_tool="…"`; agent gets a structured refusal it can reason about.
+- `REQUIRE_APPROVAL` → cancel + mark `AgentResult.requires_approval`; Temporal parks the task on an `approve_task` Update. Approval re-dispatches with a token → gate returns `ALLOW`.
+
+This implements the harness "5-layer permission / PEP-PDP / ALLOW-DENY-REQUIRE_APPROVAL" pattern structurally, and uses a **two-tier review** posture (deterministic gate first; humans only for genuinely risky/low-confidence actions) to avoid approval fatigue.
+
+### 6.2 Evaluation harness — "eval-driven development"
+- **Golden sets per agent** under `agents/<id>/fixtures/` (20–50 total across stale/duplicate/dependency/risky-SAST/false-positive/ambiguous, per the original plan §15).
+- **Layered checks:** deterministic/structural assertions (schema valid, casefile invariants, expected disposition) run first and gate CI on `fake`; an optional **LLM-as-judge** (promptfoo-style) only adjudicates the residual on the nightly real-model run.
+- **`pass^k`:** each case run k times; require all/most passes to measure reliability under stochasticity (the existing `pass_k` field is the hook). Track per-skill activation and tool-call requests in the eval result.
+- **CI wiring:** `fake` in PR CI (hermetic); Ollama `pass^3` nightly; regression gate on golden disposition changes.
+
+### 6.3 Observability — OTel GenAI semconv end-to-end
+Strands `StrandsTelemetry().setup_otlp_exporter()` + Temporal `temporalio.contrib.opentelemetry.TracingInterceptor`, GenAI semantic-convention attributes, trace-context propagation across every swarm hop. Treat traces as queryable data for debugging multi-turn failures and building evaluators (Langfuse/Phoenix/Braintrust optional backends).
+
+---
+
+## 7. Concrete API appendix (verified against installed packages)
+
+### 7.1 Versions
+`strands-agents==1.41.0` (Py≥3.10), `strands-agents-tools==0.7.0`, `temporalio==1.27.2` (Py≥3.9, Pydantic v2 converter).
+
+### 7.2 Strands model factory
+```python
+from strands.models import BedrockModel
+from strands.models.openai import OpenAIModel
+from strands.models.ollama import OllamaModel
+from strands.models.litellm import LiteLLMModel
+
+def build_strands_model(p: ModelProfile):
+    if p.provider == "fake":     return FakeModel(p)                 # deterministic, offline
+    if p.provider == "bedrock":  return BedrockModel(model_id=p.model_id, region_name=p.region)
+    if p.provider == "ollama":   return OllamaModel(host=p.base_url, model_id=p.model_id)  # host!
+    if p.provider in ("openai", "openai_compatible"):
+        return OpenAIModel(                                          # base_url INSIDE client_args!
+            client_args={"api_key": p.api_key or "not-needed", "base_url": p.base_url},
+            model_id=p.model_id, params={"temperature": p.temperature, "max_tokens": p.max_tokens})
+    if p.provider == "litellm":  return LiteLLMModel(model_id=p.model_id, client_args=p.client_args)
+    raise ValueError(p.provider)
+```
+
+### 7.3 Tool-policy hook (the enforcement point)
+```python
+from strands.hooks import HookProvider, HookRegistry, BeforeToolCallEvent
+
+class ToolPolicyHook(HookProvider):
+    def __init__(self, ctx: ToolContext, policy: ToolPolicy): self.ctx, self.policy = ctx, policy
+    def register_hooks(self, r: HookRegistry) -> None:
+        r.add_callback(BeforeToolCallEvent, self._gate)
+    def _gate(self, e: BeforeToolCallEvent) -> None:
+        decision = self.policy.decide(e.tool_use["name"], self.ctx)
+        if decision is Decision.DENY:
+            e.cancel_tool = f"Tool '{e.tool_use['name']}' denied by policy."
+        elif decision is Decision.REQUIRE_APPROVAL:
+            e.cancel_tool = "approval-required"; self.ctx.mark_approval_required(e.tool_use)
+agent = Agent(model=m, tools=[...], hooks=[ToolPolicyHook(ctx, policy)])
+```
+
+### 7.4 Skills plugin (progressive disclosure, real)
+```python
+from strands import Agent, AgentSkills
+plugin = AgentSkills(skills="src/ado_swarm/skills", strict=True)  # dir of SKILL.md skill dirs
+agent = Agent(model=m, plugins=[plugin])
+plugin.set_available_skills(load_pack("triage-readonly"))   # phase-scoped availability
+# after run:
+activated = plugin.get_activated_skills(agent)              # -> list[str] for the audit trail
+```
+`SKILL.md` frontmatter already matches: `name` (must equal dir, lowercase-hyphen), `description`, optional `allowed-tools` (documentation only — gate via 7.3).
+
+### 7.5 Structured output (typed casefile sections)
+```python
+section = await agent.structured_output_async(RiskClassification, "Classify risk for this finding")
+```
+Caveat: `structured_output` does **not** fire `BeforeToolCallEvent`/`MessageAddedEvent`. Pattern: run tool-using reasoning with `await agent.invoke_async(prompt)` first (gated), then a `structured_output_async` call to emit the typed section.
+
+### 7.6 Temporal approvals (Update + validator) & determinism
+```python
+@workflow.update
+def approve_task(self, task_id: str, approver: str) -> str:
+    self.approvals[task_id] = approver; return "approved"
+@approve_task.validator
+def _v(self, task_id: str, approver: str) -> None:
+    if task_id not in self.awaiting_approval: raise ValueError("task not awaiting approval")
+# scheduling loop now: await workflow.wait_condition(lambda: task_id in self.approvals or ...)
+# client: await handle.execute_update(SupervisorWorkflow.approve_task, args=[tid, "alice"])
+```
+Determinism: `workflow.now()`, `workflow.uuid4()`, `workflow.random()`; freeze timestamps/ids in activities; pass Pydantic models via `pydantic_data_converter`.
+
+### 7.7 Snapshots across activity boundaries
+```python
+snap = agent.take_snapshot(preset="session")     # JSON-able dataclass -> store in workflow/Postgres
+# next activity:
+agent2 = Agent(model=m, tools=[...]); agent2.load_snapshot(snap)
+```
+
+### 7.8 Time-skipping workflow tests
+```python
+async with await WorkflowEnvironment.start_time_skipping() as env:
+    @activity.defn(name="run_agent")           # mock by matching name
+    async def fake_run_agent(...): return AgentResult(...)
+    async with Worker(env.client, task_queue=tq, workflows=[SupervisorWorkflow, AgentTaskWorkflow],
+                      activities=[fake_run_agent, fake_plan_mission]):
+        handle = await env.client.start_workflow(SupervisorWorkflow.run, args=[rid, goal], id=..., task_queue=tq)
+        await handle.execute_update(SupervisorWorkflow.approve_task, args=[tid, "alice"])
+        snap = await handle.query(SupervisorWorkflow.get_snapshot)
+```
+
+---
+
+## 8. Open decisions (for discussion)
+
+- **D1 — Multi-agent ownership.** *Recommended:* Temporal owns cross-agent orchestration; Strands agents run one-per-activity. Alternative: use Strands `Swarm`/`Graph` for the whole pipeline inside fewer activities (simpler agent handoffs, but cedes durability/visibility/approval granularity to Strands). *Recommendation: Temporal-owned.*
+- **D2 — Reasoning vs determinism per agent.** Which specialists truly need a model vs. stay deterministic? *Recommended:* `ticket_analyst` (normalize messy issues), `security_reviewer` (adjudication), `risk_auditor` (scoring), `solutions_architect` (planning) are model-driven; `repo_analyst` stays mostly deterministic + tools; `data_analyst`/`qa_lead` deterministic. Discuss per-agent.
+- **D3 — Local model target.** Ollama model for the nightly quality gate (e.g. a small Llama/Qwen). Tradeoff: bigger = better evals, slower CI. *Recommended:* a small instruct model for `pass^k`, Bedrock for staging.
+- **D4 — Memory backend.** Graphiti+Neo4j (already scaffolded) vs. add mem0/Zep for cross-session recall. *Recommended:* finish Graphiti first (it's in the plan/ADR), revisit mem0 only if recall quality is insufficient.
+- **D5 — Migrations tool.** Alembic (heavier, autogenerate) vs. yoyo/`schema_migrations`-table (lighter). *Recommended:* lightweight version table + per-file transactions unless we need autogenerate.
+- **D6 — Structured output vs tool-emitted JSON.** `structured_output` is clean but bypasses tool hooks (§7.5). For write-capable agents that must stay gated end-to-end, prefer a gated `emit_section` tool. Discuss per risk tier.
+- **D7 — Scope of write capability in this plan.** Recommendation: this plan keeps everything read-only/draft; the `software_engineer`/sandbox-write path is explicitly *out of scope* until the policy+approval+verification loop is proven on read-only.
+
+---
+
+## 9. Sequencing & milestones (acceptance gates)
+
+| Milestone | Phase | Gate |
+|---|---|---|
+| **M0 Infra** | 0 | CI green; `tests/workflow/` proves mission lifecycle (run/pause/approve/cancel/replay) with mocked activities; agent tests need no services. |
+| **M1 Cognitive slice** | 1 | `ticket_analyst→repo_analyst→risk_auditor` reason via Ollama; a denied tool is provably blocked; skills appear in `activated_skills`; golden evals `pass^3` on local model, deterministic on `fake`. |
+| **M2 Governance** | 2 | Approval Update gates a real tool; rejection refused by validator; policy-denied tool → non-retryable `ApplicationError`; one plan/scheduler representation. |
+| **M3 DX/dedup** | 3 | New agent = 1 metadata + 1 `enrich()` + 1 fixture; `ado-swarm agent run` works against a real model; `skills-validate` catches drift; ≥500 LOC removed. |
+| **M4 Production** | 4 | Pooled DB + leak-free providers; `budget_events` enforced; OTel trace operator→model; Graphiti recall used in adjudication. |
+
+**Recommended first wave:** M0 → M1. M1 is the existential validation from review §10-P0 — if the cognitive loop can't reliably produce correct dispositions on a local model with `pass^k`, that finding should reshape everything after it. Everything from M2 on assumes M1 succeeded.
+
+---
+
+## 10. Mapping back to the review
+
+| Review finding | Addressed in |
+|---|---|
+| §2.1 agents don't reason | Phase 1 (Strands runtime, structured output) |
+| §2.2 skills inert | Phase 1 (`AgentSkills`, metadata single-source) |
+| §2.3 policy not enforced | Phase 1 (`ToolPolicyHook`) + §6.1 |
+| §2.4 approvals don't gate | Phase 2 (Update+validator) |
+| §3.1 three plan/DAG reps | Phase 2 (collapse to one) |
+| §3.4 dead code | Phase 0 quick wins |
+| §4 redundancy (~700 LOC) | Phase 3 (`CasefileAgent`, eval harness, skill gen) |
+| §5 determinism/retry/replan | Phase 0 + Phase 2 |
+| §6 testability | Phase 0 (DI, in-memory stores, workflow tests) |
+| §7 scale/resources/budgets | Phase 4 |
+| §8 contracts hardening | Phase 4 |
+| §9 DX & AI tooling | Phase 0 (CI/hook) + Phase 3 (harness, scaffolder, skill/plugin) |
+</content>
