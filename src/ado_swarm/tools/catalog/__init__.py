@@ -10,7 +10,12 @@ from __future__ import annotations
 from typing import Any
 
 from ado_swarm.tools.catalog.adjudication import adjudication_signals
-from ado_swarm.tools.catalog.remediation import propose_remediation_strategy
+from ado_swarm.tools.catalog.analytics import summarize_findings
+from ado_swarm.tools.catalog.readiness import assess_readiness
+from ado_swarm.tools.catalog.remediation import (
+    apply_remediation_change,
+    propose_remediation_strategy,
+)
 from ado_swarm.tools.catalog.repository import resolve_repository, verify_file_location
 from ado_swarm.tools.catalog.risk import score_severity
 from ado_swarm.tools.catalog.triage import normalize_finding
@@ -24,6 +29,9 @@ CATALOG: dict[str, Any] = {
     "adjudication_signals": adjudication_signals,
     "propose_remediation_strategy": propose_remediation_strategy,
     "propose_validation_checks": propose_validation_checks,
+    "assess_readiness": assess_readiness,
+    "summarize_findings": summarize_findings,
+    "apply_remediation_change": apply_remediation_change,
 }
 
 

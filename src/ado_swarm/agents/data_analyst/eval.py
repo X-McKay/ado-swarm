@@ -1,53 +1,62 @@
 from __future__ import annotations
 
-import argparse
-import asyncio
 import json
 from pathlib import Path
-from uuid import uuid4
 
-from ado_swarm.agents.data_analyst.main import build_agent
-from ado_swarm.agents.eval_support import build_eval_model_gateway
-from ado_swarm.contracts.mission import AgentInvocation, TaskSpec
+from ado_swarm.agents.eval_support import eval_cli, eval_invocation, run_agent_eval
+from ado_swarm.agents.ticket_analyst.normalization import normalize_source_issue
+from ado_swarm.contracts.analytics import CampaignReport
+from ado_swarm.contracts.events import TaskState
+from ado_swarm.contracts.mission import AgentResult
+from ado_swarm.contracts.source_provider import SourceIssue
+from ado_swarm.model_gateway.strands_models import FakeModel, ScriptStep, ToolCall
+
+FIXTURE = Path(__file__).resolve().parents[4] / "tests/fixtures/source_issues/codeql_sast.json"
 
 
 async def run_eval(model_profile: str = "fake") -> dict:
-    agent = build_agent(build_eval_model_gateway(model_profile))
-    task = TaskSpec(
-        run_id="eval-run",
-        title="Evaluate Data Analyst",
-        objective="Run deterministic isolated evaluation for Data Analyst.",
-        capability="data_analyst",
-        agent_id="data_analyst",
+    issue = SourceIssue.model_validate(json.loads(FIXTURE.read_text()))
+    finding = normalize_source_issue(issue)
+    findings = [finding.model_dump(mode="json")]
+    expected = CampaignReport(
+        total_findings=1,
+        by_category={finding.category or "security": 1},
+        by_severity={finding.severity: 1} if finding.severity else {},
+        recommendations=["Prioritize the most common category for a remediation campaign."],
+        rationale="Single-finding sample; expand history for stronger campaign signals.",
     )
-    result = await agent.run(
-        AgentInvocation(
-            run_id="eval-run",
-            task=task,
-            context_id="eval",
-            plan_version=1,
-            idempotency_key=str(uuid4()),
-        )
+    fake = FakeModel(
+        script=[
+            ScriptStep(
+                tool_calls=[ToolCall(name="summarize_findings", input={"findings": findings})]
+            ),
+            ScriptStep(text="summarized findings"),
+        ],
+        structured_outputs={CampaignReport: expected},
     )
-    return {
-        "agent_id": "data_analyst",
-        "passed": result.state == "completed",
-        "result": result.model_dump(mode="json"),
-    }
+    invocation = eval_invocation(
+        "data_analyst",
+        objective="Mine findings for campaign patterns.",
+        constraints={"findings": findings},
+    )
+
+    def assertion(result: AgentResult) -> bool:
+        if result.state != TaskState.COMPLETED or not result.artifact_refs:
+            return False
+        report = result.artifact_refs[0].metadata.get("campaign_report")
+        return bool(report) and "summarize_findings" in result.requested_tools
+
+    return await run_agent_eval(
+        "data_analyst",
+        invocation=invocation,
+        model_profile=model_profile,
+        fake_model=fake,
+        assertion=assertion,
+    )
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--model-profile", default="fake")
-    parser.add_argument("--output")
-    args = parser.parse_args()
-    payload = asyncio.run(run_eval(args.model_profile))
-    if args.output:
-        path = Path(args.output)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(payload, indent=2))
-    else:
-        print(json.dumps(payload, indent=2))
+    eval_cli(run_eval)
 
 
 if __name__ == "__main__":

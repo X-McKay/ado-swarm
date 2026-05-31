@@ -28,15 +28,15 @@ def test_metadata_skills_exist_in_catalog(agent_id: str) -> None:
 
 
 @pytest.mark.parametrize("agent_id", AGENT_IDS)
-def test_model_driven_agents_declare_valid_tools_and_section(agent_id: str) -> None:
+def test_model_driven_agents_declare_valid_tools_and_skills(agent_id: str) -> None:
     agent = build_agent(agent_id, model_gateway=build_eval_model_gateway("fake"))
-    if not isinstance(agent, CasefileAgent):
-        pytest.skip(f"{agent_id} is not yet a model-driven CasefileAgent")
-    # The core rule: a model-driven agent has ≥1 tool, all in the catalog, and a section.
-    assert agent.tool_names, f"{agent_id} (CasefileAgent) declares no tools"
+    # The core rule: every agent is model-driven with ≥1 tool, all from the catalog.
+    assert getattr(agent, "tool_names", None), f"{agent_id} declares no tools"
     unknown = [t for t in agent.tool_names if t not in tool_names()]
     assert not unknown, f"{agent_id} declares unknown tools: {unknown}"
-    assert agent.section_model is not None, f"{agent_id} declares no section_model"
-    assert agent.section_field, f"{agent_id} declares no section_field"
     # Skills are single-sourced from metadata by the registry.
     assert agent.skill_names, f"{agent_id} resolved no skills from metadata"
+    # Casefile agents additionally emit exactly one typed section.
+    if isinstance(agent, CasefileAgent):
+        assert agent.section_model is not None, f"{agent_id} declares no section_model"
+        assert agent.section_field, f"{agent_id} declares no section_field"

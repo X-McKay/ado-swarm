@@ -72,6 +72,25 @@ class ValidationResult(BaseModel):
     rationale: str = ""
 
 
+class ExecutionResult(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    applied: bool = False
+    sandbox_session_id: str | None = None
+    changed_files: list[str] = Field(default_factory=list)
+    diff_summary: str = ""
+    rationale: str = ""
+
+
+class ReadinessVerdict(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    ready: bool = False
+    next_phase: str | None = None
+    blocking_reasons: list[str] = Field(default_factory=list)
+    rationale: str = ""
+
+
 class SecurityCasefile(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -84,6 +103,8 @@ class SecurityCasefile(BaseModel):
     risk: RiskClassification | None = None
     remediation_plan: RemediationPlan | None = None
     validation: ValidationResult | None = None
+    execution: ExecutionResult | None = None
+    readiness: ReadinessVerdict | None = None
     audit: dict[str, Any] = Field(default_factory=dict)
     final_disposition: Literal[
         "open",

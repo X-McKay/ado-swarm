@@ -4,8 +4,8 @@ Per `docs/concepts/agents-tools-skills.md`, every agent is a Strands `Agent`
 (model + tools in a loop). A `CasefileAgent` reads a `SecurityCasefile`, runs a
 real reasoning loop (the model calls deterministic catalog tools through the
 policy gate, with skills progressively disclosed), then emits exactly one typed
-casefile section via structured output. The deterministic logic the old agents
-inlined now lives in the tool catalog.
+casefile section via structured output. The Strands plumbing lives in
+`agents/model_runtime.run_model_agent`.
 """
 
 from __future__ import annotations
@@ -16,20 +16,17 @@ from time import perf_counter
 from typing import ClassVar
 
 from pydantic import BaseModel
-from strands import Agent, AgentSkills
 from strands.models import Model
 
 from ado_swarm.agents.casefile_utils import casefile_artifact, casefile_from_invocation
+from ado_swarm.agents.model_runtime import run_model_agent
 from ado_swarm.contracts.budget import BudgetUsage
 from ado_swarm.contracts.casefile import SecurityCasefile
 from ado_swarm.contracts.events import TaskState
 from ado_swarm.contracts.mission import AgentInvocation, AgentResult
 from ado_swarm.model_gateway.gateway import ModelGateway
 from ado_swarm.model_gateway.strands_models import build_strands_model
-from ado_swarm.skills.runtime import build_skills_plugin
-from ado_swarm.tools.catalog import get_tools
-from ado_swarm.tools.policy import ApprovalState, ToolContext, ToolPolicy
-from ado_swarm.tools.policy_hook import ToolPolicyHook
+from ado_swarm.tools.policy import ApprovalState, ToolContext
 
 
 @dataclass
@@ -46,6 +43,8 @@ class CasefileAgent:
     section_field: ClassVar[str] = ""
     section_model: ClassVar[type[BaseModel] | None] = None
     tool_names: ClassVar[list[str]] = []
+    # Subset of tool_names that mutate state and therefore require approval.
+    write_tool_names: ClassVar[list[str]] = []
 
     # ------------------------------------------------------------------
     def system_prompt(self) -> str:
@@ -86,25 +85,6 @@ class CasefileAgent:
             provider=invocation.source_provider,
         )
 
-    def _build_strands_agent(
-        self, invocation: AgentInvocation
-    ) -> tuple[Agent, ToolPolicyHook, AgentSkills | None]:
-        policy = ToolPolicy(self.tool_names)
-        # The forced structured-output tool is named after the section model; it is
-        # harness machinery and must bypass the domain tool policy.
-        harness_tools = {self.section_model.__name__} if self.section_model else set()
-        hook = ToolPolicyHook(policy, self._tool_context(invocation), harness_tools=harness_tools)
-        plugin = build_skills_plugin(self.skill_names)
-        agent = Agent(
-            model=self._resolve_model(),
-            tools=get_tools(self.tool_names),
-            plugins=[plugin] if plugin else [],
-            hooks=[hook],
-            system_prompt=self.system_prompt(),
-            callback_handler=None,  # no console streaming; we capture results structurally
-        )
-        return agent, hook, plugin
-
     async def run(self, invocation: AgentInvocation) -> AgentResult:
         started = perf_counter()
         casefile = casefile_from_invocation(invocation)
@@ -118,17 +98,18 @@ class CasefileAgent:
                 error_message="no casefile available on invocation",
             )
 
-        agent, hook, plugin = self._build_strands_agent(invocation)
-        # One non-deprecated invocation: the model reasons (calling tools through the
-        # policy gate) and emits the typed section in the same loop, so the structured
-        # output reflects the tool results in context (matters on real models).
-        result = await agent.invoke_async(
-            self.reasoning_prompt(casefile),
-            structured_output_model=self.section_model,
-            structured_output_prompt=self.section_prompt(casefile),
+        run = await run_model_agent(
+            model=self._resolve_model(),
+            tool_names=self.tool_names,
+            skill_names=self.skill_names,
+            system_prompt=self.system_prompt(),
+            reasoning_prompt=self.reasoning_prompt(casefile),
+            output_model=self.section_model,
+            output_prompt=self.section_prompt(casefile),
+            tool_context=self._tool_context(invocation),
+            write_tool_names=self.write_tool_names,
         )
-        section = result.structured_output
-        if section is None:
+        if run.section is None:
             return AgentResult(
                 run_id=invocation.run_id,
                 task_id=invocation.task.task_id,
@@ -137,17 +118,15 @@ class CasefileAgent:
                 error_type="ValidationFailed",
                 error_message="model returned no structured output",
             )
-        setattr(casefile, self.section_field, section)
+        setattr(casefile, self.section_field, run.section)
 
-        available = [s.name for s in plugin.get_available_skills()] if plugin else []
-        activated = plugin.get_activated_skills(agent) if plugin else []
         casefile.audit[self.agent_id] = {
             "section": self.section_field,
-            "available_skills": available,
-            "activated_skills": activated,
-            "tools_allowed": hook.outcome.allowed,
-            "tools_denied": hook.outcome.denied,
-            "tools_approval_required": hook.outcome.approval_required,
+            "available_skills": run.available_skills,
+            "activated_skills": run.activated_skills,
+            "tools_allowed": run.policy_outcome.allowed,
+            "tools_denied": run.policy_outcome.denied,
+            "tools_approval_required": run.policy_outcome.approval_required,
         }
 
         usage = BudgetUsage(agent_loops=1, model_calls=1, elapsed_seconds=perf_counter() - started)
@@ -158,8 +137,8 @@ class CasefileAgent:
             summary=f"{self.display_name} produced {self.section_field}.",
             rationale=json.dumps(casefile.audit[self.agent_id], indent=2, sort_keys=True),
             artifact_refs=[casefile_artifact(casefile, producer=self.agent_id)],
-            activated_skills=activated or available,
-            requested_tools=hook.outcome.allowed,
-            requires_approval=bool(hook.outcome.approval_required),
+            activated_skills=run.activated_skills or run.available_skills,
+            requested_tools=run.policy_outcome.allowed,
+            requires_approval=bool(run.policy_outcome.approval_required),
             budget_usage=usage,
         )

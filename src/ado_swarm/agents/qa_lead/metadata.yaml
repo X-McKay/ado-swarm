@@ -12,8 +12,7 @@ skills:
   - security-ticket-normalization
 tools:
   allowed:
-    - casefile_read
-    - blackboard_append
+    - assess_readiness
   denied:
     - provider_create_draft_pr
     - git_write
