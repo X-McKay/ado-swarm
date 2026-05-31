@@ -11,6 +11,12 @@ from typing import Any
 
 from ado_swarm.tools.catalog.adjudication import adjudication_signals
 from ado_swarm.tools.catalog.analytics import summarize_findings
+from ado_swarm.tools.catalog.knowledge import graphiti_add_episode, graphiti_search
+from ado_swarm.tools.catalog.provider import (
+    provider_get_issue,
+    provider_get_repo_metadata,
+    provider_search_issues,
+)
 from ado_swarm.tools.catalog.readiness import assess_readiness
 from ado_swarm.tools.catalog.remediation import (
     apply_remediation_change,
@@ -32,6 +38,13 @@ CATALOG: dict[str, Any] = {
     "assess_readiness": assess_readiness,
     "summarize_findings": summarize_findings,
     "apply_remediation_change": apply_remediation_change,
+    # Knowledge (graph-memory) tools
+    "graphiti_search": graphiti_search,
+    "graphiti_add_episode": graphiti_add_episode,
+    # Provider read tools
+    "provider_get_issue": provider_get_issue,
+    "provider_search_issues": provider_search_issues,
+    "provider_get_repo_metadata": provider_get_repo_metadata,
 }
 
 

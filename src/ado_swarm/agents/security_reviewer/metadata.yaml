@@ -15,6 +15,7 @@ skills:
 tools:
   allowed:
     - adjudication_signals
+    - graphiti_search
   denied:
     - provider_create_draft_pr
     - git_write
