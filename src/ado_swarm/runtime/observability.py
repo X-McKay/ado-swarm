@@ -32,7 +32,3 @@ def span(name: str, **attributes: Any) -> Iterator[RuntimeSpan]:
     finally:
         current.end_time = datetime.now(UTC)
         current.duration_ms = (perf_counter() - started) * 1000
-
-
-def event_payload(event_type: str, **data: Any) -> dict[str, Any]:
-    return {"event_type": event_type, "timestamp": datetime.now(UTC).isoformat(), **data}

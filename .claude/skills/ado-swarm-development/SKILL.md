@@ -4,6 +4,17 @@ description: Develop and modify the ado-swarm base architecture, agents, provide
 ---
 # ado-swarm development
 
+## Canonical vocabulary — read first (`docs/concepts/agents-tools-skills.md`)
+
+We use Simon Willison's definitions:
+- **Agent** = *tools in a loop* — an LLM called with tool definitions, executing tools and feeding results back in a bounded loop. **An agent always uses a model.**
+- **Tool** = an executable function the harness gives the agent (its *hands*); deterministic, typed, unit-tested.
+- **Skill** = packaged expertise (a `SKILL.md`) loaded into context to shape *how* an agent approaches a problem; it is context, not code.
+
+**THE CORE RULE:** every agent uses a model. If a unit of work is deterministic, it is a **tool** (or a harness verification step) — **never** an agent. Do not create "deterministic agents." If you find deterministic logic inside an agent's `run()`, extract it into a `@tool` in the tool catalog. To restrict what an agent can do, change the tool policy — not the prompt or a skill's `allowed-tools` (which is documentation only).
+
+## Core boundaries
+
 When working in this repository, preserve the core boundaries:
 
 1. Temporal workflows stay deterministic and delegate I/O to activities.

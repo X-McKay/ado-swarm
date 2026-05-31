@@ -15,6 +15,9 @@ class ModelProfile(BaseModel):
     base_url: str | None = None
     temperature: float = 0.0
     max_tokens: int = 2048
+    api_key: str | None = None
+    region: str | None = None
+    params: dict[str, Any] = {}
 
 
 class ModelGateway:

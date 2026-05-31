@@ -25,6 +25,10 @@ just smoke
 
 Temporal owns durable orchestration. Agents own reasoning and structured outputs. Provider adapters hide Azure DevOps and GitHub differences behind canonical contracts. Tool access is policy-gated and denied by default outside the current phase and trust zone.
 
+## Core concepts: agents, tools, and skills
+
+This project follows Simon Willison's definitions: an **agent** is *tools in a loop* (an LLM that calls tools and feeds results back until done — it always uses a model), a **tool** is a deterministic executable capability the harness gives the agent, and a **skill** is packaged expertise loaded into context. **The core rule: every agent uses a model; anything deterministic is a tool, never an agent.** See [`docs/concepts/agents-tools-skills.md`](docs/concepts/agents-tools-skills.md).
+
 ## Agent catalog
 
 Each agent lives under `src/ado_swarm/agents/<agent_name>/` and has:

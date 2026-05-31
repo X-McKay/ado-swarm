@@ -32,6 +32,23 @@ eval-agents:
 
 check: lint typecheck test eval-agents
 
+# --- Added for the cleanup (Phase 0 infra) ---
+
+format-check:
+  uv run ruff format --check src tests
+
+test-cov:
+  uv run pytest tests/unit --cov=ado_swarm --cov-report=term-missing
+
+test-workflow:
+  uv run pytest tests/workflow
+
+skills-validate:
+  uv run python -c "from ado_swarm.skills.loader import validate_packs; import sys; bad=validate_packs(); print('OK' if not bad else bad); sys.exit(1 if bad else 0)"
+
+up-ollama:
+  docker compose -f docker-compose.yml -f docker-compose.ollama.yml up -d --build
+
 up:
   docker compose up -d --build
 

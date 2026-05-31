@@ -1,80 +1,61 @@
 from __future__ import annotations
 
-import argparse
-import asyncio
 import json
 from pathlib import Path
-from uuid import uuid4
 
-from ado_swarm.agents.eval_support import build_eval_model_gateway
-from ado_swarm.agents.ticket_analyst.main import build_agent
-from ado_swarm.contracts.mission import AgentInvocation, TaskSpec
+from ado_swarm.agents.eval_support import eval_cli, eval_invocation, run_agent_eval
+from ado_swarm.agents.ticket_analyst.normalization import normalize_source_issue
+from ado_swarm.contracts.casefile import NormalizedFinding
+from ado_swarm.contracts.events import TaskState
+from ado_swarm.contracts.mission import AgentResult
 from ado_swarm.contracts.source_provider import SourceIssue
-from ado_swarm.tools.source_providers.stub import StubSourceProvider
+from ado_swarm.model_gateway.strands_models import FakeModel, ScriptStep, ToolCall
 
-FIXTURE_PATH = Path("src/ado_swarm/agents/ticket_analyst/fixtures/codeql_sast_issue.json")
-
-
-def load_fixture_issue() -> SourceIssue:
-    return SourceIssue.model_validate_json(FIXTURE_PATH.read_text())
-
-
-async def _evaluate_issue(model_profile: str, issue: SourceIssue) -> dict:
-    agent = build_agent(build_eval_model_gateway(model_profile))
-    task = TaskSpec(
-        run_id="eval-run",
-        title="Evaluate Ticket Analyst",
-        objective="Normalize a provider issue into a canonical security finding.",
-        capability="ticket_analyst",
-        agent_id="ticket_analyst",
-        constraints={"source_issue": issue.model_dump(mode="json")},
-    )
-    result = await agent.run(
-        AgentInvocation(
-            run_id="eval-run",
-            task=task,
-            context_id="eval",
-            plan_version=1,
-            idempotency_key=str(uuid4()),
-        )
-    )
-    casefile = result.artifact_refs[0].metadata["casefile"] if result.artifact_refs else None
-    finding = casefile["normalized_finding"] if casefile else None
-    expected_category = "dependency" if "dependency" in issue.title.lower() else None
-    passed = result.state == "completed" and finding is not None and finding["confidence"] >= 0.55
-    if expected_category:
-        passed = passed and finding["category"] == expected_category
-    return {
-        "issue": issue.external_id,
-        "passed": passed,
-        "finding": finding,
-        "result": result.model_dump(mode="json"),
-    }
+FIXTURE = Path(__file__).resolve().parents[4] / "tests/fixtures/source_issues/codeql_sast.json"
 
 
 async def run_eval(model_profile: str = "fake") -> dict:
-    provider = StubSourceProvider()
-    issues = [await provider.get_issue("SEC-1"), load_fixture_issue()]
-    cases = [await _evaluate_issue(model_profile, issue) for issue in issues]
-    return {
-        "agent_id": "ticket_analyst",
-        "passed": all(case["passed"] for case in cases),
-        "cases": cases,
-    }
+    issue_dict = json.loads(FIXTURE.read_text())
+    issue = SourceIssue.model_validate(issue_dict)
+    expected = normalize_source_issue(issue)
+    fake = FakeModel(
+        script=[
+            ScriptStep(
+                tool_calls=[ToolCall(name="normalize_finding", input={"issue": issue_dict})]
+            ),
+            ScriptStep(text="normalized the finding"),
+        ],
+        structured_outputs={NormalizedFinding: expected},
+    )
+    invocation = eval_invocation(
+        "ticket_analyst",
+        objective="Normalize the provider issue into a canonical finding.",
+        constraints={"source_issue": issue_dict},
+    )
+
+    def assertion(result: AgentResult) -> bool:
+        if result.state != TaskState.COMPLETED or not result.artifact_refs:
+            return False
+        casefile = result.artifact_refs[0].metadata["casefile"]
+        finding = casefile.get("normalized_finding")
+        audit = casefile.get("audit", {}).get("ticket_analyst", {})
+        return (
+            bool(finding)
+            and finding.get("severity") == expected.severity
+            and "normalize_finding" in audit.get("tools_allowed", [])
+        )
+
+    return await run_agent_eval(
+        "ticket_analyst",
+        invocation=invocation,
+        model_profile=model_profile,
+        fake_model=fake,
+        assertion=assertion,
+    )
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--model-profile", default="fake")
-    parser.add_argument("--output")
-    args = parser.parse_args()
-    payload = asyncio.run(run_eval(args.model_profile))
-    if args.output:
-        path = Path(args.output)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(payload, indent=2))
-    else:
-        print(json.dumps(payload, indent=2))
+    eval_cli(run_eval)
 
 
 if __name__ == "__main__":

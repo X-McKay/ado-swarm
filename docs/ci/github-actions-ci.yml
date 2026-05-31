@@ -1,0 +1,35 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: jdx/mise-action@v2
+      - run: uv sync --all-extras --dev
+      - run: uv run ruff format --check src tests
+      - run: uv run ruff check src tests
+      - run: uv run ty check
+      - run: uv run pytest tests/unit
+      - run: uv run ado-swarm eval-agents --model-profile fake
+
+  # Manual placeholder for future Docker-based integration tests.
+  # Gated on workflow_dispatch only; not run on PRs/pushes yet.
+  integration:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: TODO
+        run: |
+          echo "TODO: Docker-based integration tests (services + uv run pytest tests/integration). Manual placeholder."

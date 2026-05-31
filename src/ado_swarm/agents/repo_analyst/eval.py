@@ -1,70 +1,76 @@
 from __future__ import annotations
 
-import argparse
-import asyncio
 import json
 from pathlib import Path
-from uuid import uuid4
 
-from ado_swarm.agents.eval_support import build_eval_model_gateway
-from ado_swarm.agents.repo_analyst.main import build_agent
+from ado_swarm.agents.eval_support import eval_cli, eval_invocation, run_agent_eval
 from ado_swarm.agents.ticket_analyst.normalization import build_casefile
-from ado_swarm.contracts.mission import AgentInvocation, TaskSpec
+from ado_swarm.contracts.casefile import RepositoryEvidence
+from ado_swarm.contracts.events import TaskState
+from ado_swarm.contracts.mission import AgentResult
 from ado_swarm.contracts.source_provider import SourceIssue
+from ado_swarm.model_gateway.strands_models import FakeModel, ScriptStep, ToolCall
 
-
-def _fixture_casefile() -> dict:
-    issue = SourceIssue.model_validate(
-        json.loads(Path("tests/fixtures/source_issues/codeql_sast.json").read_text())
-    )
-    casefile = build_casefile("eval-run", issue)
-    casefile.repository_evidence = None
-    casefile.adjudication = None
-    casefile.risk = None
-    casefile.remediation_plan = None
-    return casefile.model_dump(mode="json")
+FIXTURE = Path(__file__).resolve().parents[4] / "tests/fixtures/source_issues/codeql_sast.json"
 
 
 async def run_eval(model_profile: str = "fake") -> dict:
-    agent = build_agent(build_eval_model_gateway(model_profile))
-    task = TaskSpec(
-        run_id="eval-run",
-        title="Evaluate Repository Analyst",
-        objective="Run deterministic casefile evaluation for Repository Analyst.",
-        capability="repo_analyst",
-        agent_id="repo_analyst",
-        constraints={"casefile": _fixture_casefile()},
+    issue = SourceIssue.model_validate(json.loads(FIXTURE.read_text()))
+    casefile = build_casefile("eval-run", issue)
+    casefile.repository_evidence = None
+    issue_dict = issue.model_dump(mode="json")
+    repo_dict = issue.repository.model_dump(mode="json") if issue.repository else {}
+    file_path = (
+        casefile.normalized_finding.file_path if casefile.normalized_finding else None
+    ) or "README.md"
+    expected = RepositoryEvidence(
+        repository=issue.repository,
+        ref=issue.repository.default_branch if issue.repository else None,
+        file_exists=True,
+        evidence=["repository resolved and file verified"],
     )
-    result = await agent.run(
-        AgentInvocation(
-            run_id="eval-run",
-            task=task,
-            context_id="eval",
-            plan_version=1,
-            idempotency_key=str(uuid4()),
-        )
+    fake = FakeModel(
+        script=[
+            ScriptStep(
+                tool_calls=[ToolCall(name="resolve_repository", input={"source_issue": issue_dict})]
+            ),
+            ScriptStep(
+                tool_calls=[
+                    ToolCall(
+                        name="verify_file_location",
+                        input={"repository": repo_dict, "path": file_path, "ref": "main"},
+                    )
+                ]
+            ),
+            ScriptStep(text="gathered repository evidence"),
+        ],
+        structured_outputs={RepositoryEvidence: expected},
     )
-    casefile = result.artifact_refs[0].metadata["casefile"] if result.artifact_refs else {}
-    passed = result.state == "completed" and casefile.get("repository_evidence") is not None
-    return {
-        "agent_id": "repo_analyst",
-        "passed": passed,
-        "result": result.model_dump(mode="json"),
-    }
+    invocation = eval_invocation(
+        "repo_analyst",
+        objective="Gather read-only repository evidence.",
+        constraints={"casefile": casefile.model_dump(mode="json")},
+    )
+
+    def assertion(result: AgentResult) -> bool:
+        if result.state != TaskState.COMPLETED or not result.artifact_refs:
+            return False
+        casefile_out = result.artifact_refs[0].metadata["casefile"]
+        evidence = casefile_out.get("repository_evidence")
+        audit = casefile_out.get("audit", {}).get("repo_analyst", {})
+        return bool(evidence) and "resolve_repository" in audit.get("tools_allowed", [])
+
+    return await run_agent_eval(
+        "repo_analyst",
+        invocation=invocation,
+        model_profile=model_profile,
+        fake_model=fake,
+        assertion=assertion,
+    )
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--model-profile", default="fake")
-    parser.add_argument("--output")
-    args = parser.parse_args()
-    payload = asyncio.run(run_eval(args.model_profile))
-    if args.output:
-        path = Path(args.output)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(payload, indent=2))
-    else:
-        print(json.dumps(payload, indent=2))
+    eval_cli(run_eval)
 
 
 if __name__ == "__main__":

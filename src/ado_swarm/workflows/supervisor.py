@@ -24,7 +24,10 @@ class SupervisorWorkflow:
 
     @workflow.run
     async def run(self, run_id: str, goal: str) -> RunSnapshot:
-        self.snapshot = RunSnapshot(run_id=run_id, status=RunStatus.PLANNING, goal=goal)
+        # Use the deterministic workflow clock, never wall-clock, inside the workflow.
+        self.snapshot = RunSnapshot(
+            run_id=run_id, status=RunStatus.PLANNING, goal=goal, updated_at=workflow.now()
+        )
         raw_plan = await workflow.execute_activity(
             "plan_mission",
             args=[run_id, goal],

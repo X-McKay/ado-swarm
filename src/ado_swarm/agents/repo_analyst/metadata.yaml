@@ -10,11 +10,12 @@ skill_packs:
   - triage-readonly
 skills:
   - repository-resolution
+  - code-location-verification
+  - git-history-investigation
 tools:
   allowed:
-    - casefile_read
-    - blackboard_append
-    - provider_get_issue
+    - resolve_repository
+    - verify_file_location
   denied:
     - provider_create_draft_pr
     - git_write

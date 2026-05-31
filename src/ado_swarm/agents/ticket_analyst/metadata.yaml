@@ -16,11 +16,7 @@ skills:
   - scanner-finding-fingerprinting
 tools:
   allowed:
-    - provider_get_issue
-    - provider_search_issues
-    - casefile_read
-    - casefile_update_section
-    - blackboard_append
+    - normalize_finding
   denied:
     - provider_create_draft_pr
     - git_write

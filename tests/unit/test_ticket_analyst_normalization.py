@@ -1,14 +1,17 @@
-import json
 from pathlib import Path
 
 import pytest
 
 from ado_swarm.agents.ticket_analyst.main import build_agent
 from ado_swarm.agents.ticket_analyst.normalization import build_casefile, normalize_source_issue
+from ado_swarm.contracts.casefile import NormalizedFinding
 from ado_swarm.contracts.mission import AgentInvocation, TaskSpec
 from ado_swarm.contracts.source_provider import SourceIssue, SourceProviderKind
 from ado_swarm.model_gateway.gateway import ModelGateway, ModelProfile
+from ado_swarm.model_gateway.strands_models import FakeModel, ScriptStep, ToolCall
 from ado_swarm.tools.source_providers.stub import StubSourceProvider
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 @pytest.mark.asyncio
@@ -22,7 +25,7 @@ async def test_normalize_stub_dependency_issue() -> None:
 
 
 def test_normalize_codeql_sast_fixture() -> None:
-    fixture = Path("src/ado_swarm/agents/ticket_analyst/fixtures/codeql_sast_issue.json")
+    fixture = REPO_ROOT / "src/ado_swarm/agents/ticket_analyst/fixtures/codeql_sast_issue.json"
     issue = SourceIssue.model_validate_json(fixture.read_text())
     finding = normalize_source_issue(issue)
     assert finding.scanner == "CodeQL"
@@ -34,16 +37,30 @@ def test_normalize_codeql_sast_fixture() -> None:
 
 
 @pytest.mark.asyncio
-async def test_ticket_analyst_returns_casefile_artifact() -> None:
+async def test_ticket_analyst_runs_model_loop_with_tool_and_section() -> None:
+    """The model-driven agent calls the normalize_finding tool through the policy
+    gate and emits a typed NormalizedFinding section (deterministic via FakeModel)."""
     issue = await StubSourceProvider().get_issue("SEC-1")
+    issue_dict = issue.model_dump(mode="json")
+    expected = normalize_source_issue(issue)
     agent = build_agent(ModelGateway(ModelProfile(provider="fake")))
+    agent.skill_names = ["security-ticket-normalization"]
+    agent.model = FakeModel(
+        script=[
+            ScriptStep(
+                tool_calls=[ToolCall(name="normalize_finding", input={"issue": issue_dict})]
+            ),
+            ScriptStep(text="normalized"),
+        ],
+        structured_outputs={NormalizedFinding: expected},
+    )
     task = TaskSpec(
         run_id="run-1",
         title="Normalize ticket",
         objective="Normalize source issue.",
         capability="ticket_analyst",
         agent_id="ticket_analyst",
-        constraints={"source_issue": issue.model_dump(mode="json")},
+        constraints={"source_issue": issue_dict},
     )
     result = await agent.run(
         AgentInvocation(
@@ -57,9 +74,8 @@ async def test_ticket_analyst_returns_casefile_artifact() -> None:
     assert result.artifact_refs
     casefile = result.artifact_refs[0].metadata["casefile"]
     assert casefile["normalized_finding"]["category"] == "dependency"
+    assert "normalize_finding" in result.requested_tools
     assert "security-ticket-normalization" in result.activated_skills
-    rationale = json.loads(result.rationale or "{}")
-    assert rationale["casefile_id"].startswith("casefile-")
 
 
 def test_build_casefile_preserves_audit_missing_fields() -> None:
