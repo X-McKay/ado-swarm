@@ -25,6 +25,28 @@ class ModelAgentRun:
     available_skills: list[str]
     activated_skills: list[str]
     policy_outcome: PolicyOutcome
+    # Real token usage accumulated across the Strands event loop (all model
+    # invocations in the run), read from AgentResult.metrics.accumulated_usage.
+    input_tokens: int = 0
+    output_tokens: int = 0
+    model_calls: int = 0
+
+
+def _usage_from_result(result: object) -> tuple[int, int, int]:
+    """Extract (input_tokens, output_tokens, model_calls) from an AgentResult.
+
+    Strands accumulates usage on ``AgentResult.metrics`` (an
+    ``EventLoopMetrics``): ``accumulated_usage`` is a ``Usage`` mapping with
+    ``inputTokens``/``outputTokens``/``totalTokens``, and ``cycle_count`` is the
+    number of model invocations in the run. All reads are defensive so a model
+    that omits metrics simply yields zeros rather than raising.
+    """
+    metrics = getattr(result, "metrics", None)
+    usage = getattr(metrics, "accumulated_usage", None) or {}
+    input_tokens = int(usage.get("inputTokens", 0) or 0)
+    output_tokens = int(usage.get("outputTokens", 0) or 0)
+    model_calls = int(getattr(metrics, "cycle_count", 0) or 0)
+    return input_tokens, output_tokens, model_calls
 
 
 async def run_model_agent(
@@ -57,9 +79,13 @@ async def run_model_agent(
         structured_output_model=output_model,
         structured_output_prompt=output_prompt,
     )
+    input_tokens, output_tokens, model_calls = _usage_from_result(result)
     return ModelAgentRun(
         section=result.structured_output,
         available_skills=[s.name for s in plugin.get_available_skills()] if plugin else [],
         activated_skills=plugin.get_activated_skills(agent) if plugin else [],
         policy_outcome=hook.outcome,
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+        model_calls=model_calls,
     )

@@ -57,7 +57,13 @@ class DataAnalystAgent:
             ),
         )
         report = run.section if isinstance(run.section, CampaignReport) else CampaignReport()
-        usage = BudgetUsage(agent_loops=1, model_calls=1, elapsed_seconds=perf_counter() - started)
+        usage = BudgetUsage(
+            agent_loops=1,
+            model_calls=run.model_calls or 1,
+            input_tokens=run.input_tokens,
+            output_tokens=run.output_tokens,
+            elapsed_seconds=perf_counter() - started,
+        )
         return AgentResult(
             run_id=invocation.run_id,
             task_id=invocation.task.task_id,
