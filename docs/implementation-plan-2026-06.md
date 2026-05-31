@@ -7,6 +7,19 @@
 
 ---
 
+## Implementation progress (branch `feature/claude-cleanup`)
+
+- **Phase 0 — done.** CI template (`docs/ci/github-actions-ci.yml`), SessionStart hook, justfile recipes, determinism fixes (`workflow.now()`), DI seams + in-memory stores, dead-code removal, `tests/workflow/` time-skipping suite.
+- **Phase 1 — done.** Strands model factory + deterministic `FakeModel`; `run_model_agent` runtime; `ToolPolicyHook` (`BeforeToolCallEvent`); tool catalog (10 tools); `AgentSkills`-bound skills single-sourced from metadata; **all 9 agents** model-driven via `CasefileAgent`/`run_model_agent`; non-deprecated `invoke_async(structured_output_model=...)`; shared golden-eval harness; vocabulary guardrail test.
+- **Phase 2 — done.** Approvals as Temporal Updates+validators wired into the supervisor; typed non-retryable errors; `TaskSpec.max_attempts` honored.
+- **Phase 3 (DX) — done.** `ado-swarm agents run` / `skills list|show|lint` / `scaffold agent|tool|skill`; `just` recipes; `CLAUDE.md`; `ado-swarm-add-agent` Claude skill; docs + ADR-0008 sweep.
+- **Phase 4 — in progress.** Done: asyncpg connection pooling + versioned migration runner; source-provider hardening (async-ctx lifecycle, `_request` helper, 429/Retry-After retries, pagination, `ProviderError`); real token/budget capture into `AgentResult.budget_usage`; honest `/health`. Remaining: real Graphiti/Neo4j `KnowledgeStore`; OTel GenAI tracing; provider-contract semantics pinning (`external_id`, mutation-result ids).
+- **Not started.** Phase 1.5 (eval-gated bounded adjudication swarm in `security_reviewer`); knowledge + provider-read catalog tools (`docs/tools-skills-review.md`); real `SKILL.md` bodies (still templated); collapse the duplicate plan/DAG representations (review §3.1).
+
+Gate status: `ruff` + `ruff format` + `ty` clean; 115 unit/workflow tests pass (4 skipped); `eval-agents` 9/9 on `fake`.
+
+---
+
 ## 1. How to read this
 
 The review (`codebase-review-2026-05.md`) established the diagnosis: the contracts/scaffold are sound, but the three headline capabilities — *agents reason with a model*, *skills are progressively disclosed*, *tools are policy-gated* — and approvals **are not wired into the execution path** (review §2). The whole read-only triage pipeline is deterministic Python (review §2.1, sharpened by ADR-0007).
