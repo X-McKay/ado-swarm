@@ -233,5 +233,3 @@ After the `CasefileAgent` refactor (§4), a new agent should be: one `metadata.y
 - Resolve fixtures via `Path(__file__).parent`.
 - Add `-> SourceProvider` return annotation to `factory.py` for a free conformance check.
 - Move provider credential validation into a `Settings` validator so it fails at config load.
-</content>
-</invoke>
