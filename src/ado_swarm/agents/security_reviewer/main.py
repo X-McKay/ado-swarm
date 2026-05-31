@@ -120,7 +120,7 @@ class SecurityReviewerAgent(CasefileAgent):
             tool_context=self._tool_context(invocation),
             max_model_calls=settings.adjudication_swarm_max_model_calls,
         )
-        if cell.section is None:
+        if not isinstance(cell.section, FindingAdjudication):
             return AgentResult(
                 run_id=invocation.run_id,
                 task_id=invocation.task.task_id,
@@ -129,7 +129,7 @@ class SecurityReviewerAgent(CasefileAgent):
                 error_type="ValidationFailed",
                 error_message="judge returned no structured output",
             )
-        casefile.adjudication = cell.section  # type: ignore[assignment]
+        casefile.adjudication = cell.section
         casefile.audit["security_reviewer"] = {
             "section": "adjudication",
             "mode": "swarm",
