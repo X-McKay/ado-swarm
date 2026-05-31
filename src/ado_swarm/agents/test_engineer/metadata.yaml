@@ -10,10 +10,11 @@ skill_packs:
   - triage-readonly
 skills:
   - test-and-build-validation
+  - security-fix-verification
+  - pull-request-preparation
 tools:
   allowed:
-    - casefile_read
-    - blackboard_append
+    - propose_validation_checks
   denied:
     - provider_create_draft_pr
     - git_write

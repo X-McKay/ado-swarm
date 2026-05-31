@@ -6,6 +6,7 @@ from ado_swarm.agents.repo_analyst.eval import run_eval as repo_analyst_eval
 from ado_swarm.agents.risk_auditor.eval import run_eval as risk_auditor_eval
 from ado_swarm.agents.security_reviewer.eval import run_eval as security_reviewer_eval
 from ado_swarm.agents.solutions_architect.eval import run_eval as solutions_architect_eval
+from ado_swarm.agents.test_engineer.eval import run_eval as test_engineer_eval
 from ado_swarm.agents.ticket_analyst.eval import run_eval as ticket_analyst_eval
 
 # Each model-driven agent's eval drives the real Strands agent loop with a scripted
@@ -17,6 +18,7 @@ MODEL_DRIVEN_EVALS = {
     "security_reviewer": security_reviewer_eval,
     "risk_auditor": risk_auditor_eval,
     "solutions_architect": solutions_architect_eval,
+    "test_engineer": test_engineer_eval,
 }
 
 

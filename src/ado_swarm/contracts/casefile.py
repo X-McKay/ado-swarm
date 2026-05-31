@@ -64,6 +64,14 @@ class RemediationPlan(BaseModel):
     requires_human_approval: bool = True
 
 
+class ValidationResult(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    recommended_checks: list[str] = Field(default_factory=list)
+    ready_for_review: bool = False
+    rationale: str = ""
+
+
 class SecurityCasefile(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -75,6 +83,7 @@ class SecurityCasefile(BaseModel):
     adjudication: FindingAdjudication | None = None
     risk: RiskClassification | None = None
     remediation_plan: RemediationPlan | None = None
+    validation: ValidationResult | None = None
     audit: dict[str, Any] = Field(default_factory=dict)
     final_disposition: Literal[
         "open",

@@ -14,6 +14,7 @@ from ado_swarm.tools.catalog.remediation import propose_remediation_strategy
 from ado_swarm.tools.catalog.repository import resolve_repository, verify_file_location
 from ado_swarm.tools.catalog.risk import score_severity
 from ado_swarm.tools.catalog.triage import normalize_finding
+from ado_swarm.tools.catalog.validation import propose_validation_checks
 
 CATALOG: dict[str, Any] = {
     "normalize_finding": normalize_finding,
@@ -22,6 +23,7 @@ CATALOG: dict[str, Any] = {
     "score_severity": score_severity,
     "adjudication_signals": adjudication_signals,
     "propose_remediation_strategy": propose_remediation_strategy,
+    "propose_validation_checks": propose_validation_checks,
 }
 
 
