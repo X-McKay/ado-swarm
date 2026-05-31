@@ -8,17 +8,26 @@ from uuid import uuid4
 
 from ado_swarm.agents.ticket_analyst.main import build_agent
 from ado_swarm.contracts.mission import AgentInvocation, TaskSpec
+from ado_swarm.contracts.source_provider import SourceIssue
 from ado_swarm.model_gateway.gateway import ModelGateway, ModelProfile
+from ado_swarm.tools.source_providers.stub import StubSourceProvider
+
+FIXTURE_PATH = Path("src/ado_swarm/agents/ticket_analyst/fixtures/codeql_sast_issue.json")
 
 
-async def run_eval(model_profile: str = "fake") -> dict:
+def load_fixture_issue() -> SourceIssue:
+    return SourceIssue.model_validate_json(FIXTURE_PATH.read_text())
+
+
+async def _evaluate_issue(model_profile: str, issue: SourceIssue) -> dict:
     agent = build_agent(ModelGateway(ModelProfile(provider=model_profile)))
     task = TaskSpec(
         run_id="eval-run",
         title="Evaluate Ticket Analyst",
-        objective="Run deterministic isolated evaluation for Ticket Analyst.",
+        objective="Normalize a provider issue into a canonical security finding.",
         capability="ticket_analyst",
         agent_id="ticket_analyst",
+        constraints={"source_issue": issue.model_dump(mode="json")},
     )
     result = await agent.run(
         AgentInvocation(
@@ -29,10 +38,28 @@ async def run_eval(model_profile: str = "fake") -> dict:
             idempotency_key=str(uuid4()),
         )
     )
+    casefile = result.artifact_refs[0].metadata["casefile"] if result.artifact_refs else None
+    finding = casefile["normalized_finding"] if casefile else None
+    expected_category = "dependency" if "dependency" in issue.title.lower() else None
+    passed = result.state == "completed" and finding is not None and finding["confidence"] >= 0.55
+    if expected_category:
+        passed = passed and finding["category"] == expected_category
+    return {
+        "issue": issue.external_id,
+        "passed": passed,
+        "finding": finding,
+        "result": result.model_dump(mode="json"),
+    }
+
+
+async def run_eval(model_profile: str = "fake") -> dict:
+    provider = StubSourceProvider()
+    issues = [await provider.get_issue("SEC-1"), load_fixture_issue()]
+    cases = [await _evaluate_issue(model_profile, issue) for issue in issues]
     return {
         "agent_id": "ticket_analyst",
-        "passed": result.state == "completed",
-        "result": result.model_dump(mode="json"),
+        "passed": all(case["passed"] for case in cases),
+        "cases": cases,
     }
 
 

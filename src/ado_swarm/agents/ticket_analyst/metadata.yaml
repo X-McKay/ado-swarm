@@ -1,21 +1,30 @@
 id: ticket_analyst
 name: Ticket Analyst
-version: 0.1.0
-description: Normalizes provider issues and work items into canonical findings.
+version: 0.2.0
+description: Deterministically normalizes provider issues and work items into canonical security findings and casefiles.
 entrypoint: ado_swarm.agents.ticket_analyst.main:build_agent
 eval_entrypoint: ado_swarm.agents.ticket_analyst.eval:run_eval
 capabilities:
-  - ticket-analyst
+  - ticket-normalization
+  - finding-type-classification
+  - scanner-finding-fingerprinting
 skill_packs:
   - triage-readonly
 skills:
   - security-ticket-normalization
+  - finding-type-classification
+  - scanner-finding-fingerprinting
 tools:
   allowed:
-    - casefile_read
-    - blackboard_append
     - provider_get_issue
+    - provider_search_issues
+    - casefile_read
+    - casefile_update_section
+    - blackboard_append
   denied:
     - provider_create_draft_pr
     - git_write
 risk_tier: low
+outputs:
+  schema: SecurityCasefile
+  artifact_media_type: application/json
