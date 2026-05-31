@@ -16,10 +16,14 @@ from ado_swarm.contracts.source_provider import (
     SourcePullRequest,
     SourceRepositoryRef,
 )
+from ado_swarm.tools.source_providers.base import HttpProviderMixin
 
 
-class AzureDevOpsSourceProvider:
+class AzureDevOpsSourceProvider(HttpProviderMixin):
     provider_name = SourceProviderKind.AZURE_DEVOPS.value
+
+    # ADO returns refs/items in pages of this size when continuation is used.
+    _page_size = 100
 
     def __init__(self, org_url: str, project: str, pat: str) -> None:
         self.org_url = org_url.rstrip("/")
@@ -63,11 +67,10 @@ class AzureDevOpsSourceProvider:
         )
 
     async def get_issue(self, external_id: str) -> SourceIssue:
-        response = await self.client.get(
-            f"/wit/workitems/{external_id}", params={"api-version": "7.1"}
+        data = await self._request(
+            "GET", f"/wit/workitems/{external_id}", params={"api-version": "7.1"}
         )
-        response.raise_for_status()
-        return self._issue(response.json())
+        return self._issue(data)
 
     async def search_issues(self, query: str, *, limit: int = 50) -> SourceIssuePage:
         escaped_query = query.replace("'", "''")
@@ -76,25 +79,25 @@ class AzureDevOpsSourceProvider:
             f"AND [System.Title] CONTAINS '{escaped_query}' "
             "ORDER BY [System.ChangedDate] DESC"
         )
-        wiql = {"query": wiql_query}
-        response = await self.client.post(
-            "/wit/wiql", params={"api-version": "7.1", "$top": limit}, json=wiql
+        data = await self._request(
+            "POST",
+            "/wit/wiql",
+            params={"api-version": "7.1", "$top": limit},
+            json={"query": wiql_query},
         )
-        response.raise_for_status()
-        ids = [str(item["id"]) for item in response.json().get("workItems", [])[:limit]]
+        ids = [str(item["id"]) for item in data.get("workItems", [])[:limit]]
         items = [await self.get_issue(item_id) for item_id in ids]
         return SourceIssuePage(
             provider=SourceProviderKind.AZURE_DEVOPS, items=items, query=query, limit=limit
         )
 
     async def add_issue_comment(self, external_id: str, body: str) -> ProviderMutationResult:
-        response = await self.client.post(
+        data = await self._request(
+            "POST",
             f"/wit/workItems/{external_id}/comments",
             params={"api-version": "7.1-preview.4"},
             json={"text": body},
         )
-        response.raise_for_status()
-        data = response.json()
         return ProviderMutationResult(
             provider=SourceProviderKind.AZURE_DEVOPS,
             ok=True,
@@ -105,30 +108,48 @@ class AzureDevOpsSourceProvider:
         )
 
     async def get_repository(self, owner_or_project: str, name: str) -> SourceRepositoryRef:
-        response = await self.client.get(f"/git/repositories/{name}", params={"api-version": "7.1"})
-        response.raise_for_status()
-        return self._repo_ref(response.json())
+        data = await self._request(
+            "GET", f"/git/repositories/{name}", params={"api-version": "7.1"}
+        )
+        return self._repo_ref(data)
 
     async def list_branches(
         self, repository: SourceRepositoryRef, *, limit: int = 100
     ) -> list[SourceBranch]:
-        response = await self.client.get(
-            f"/git/repositories/{repository.external_id}/refs",
-            params={"api-version": "7.1", "filter": "heads/", "peelTags": "false"},
-        )
-        response.raise_for_status()
-        return [
-            SourceBranch(
-                repository=repository,
-                name=item["name"].removeprefix("refs/heads/"),
-                sha=item.get("objectId"),
-                provider_payload=item,
-            )
-            for item in response.json().get("value", [])[:limit]
-        ]
+        url = f"/git/repositories/{repository.external_id}/refs"
+        branches: list[SourceBranch] = []
+        continuation: str | None = None
+        while len(branches) < limit:
+            params: dict[str, Any] = {
+                "api-version": "7.1",
+                "filter": "heads/",
+                "peelTags": "false",
+                "$top": min(self._page_size, limit - len(branches)),
+            }
+            if continuation:
+                params["continuationToken"] = continuation
+            response = await self._raw_request("GET", url, params=params)
+            data = self._json_or_raise(response, "GET", url)
+            page = data.get("value", [])
+            for item in page:
+                branches.append(
+                    SourceBranch(
+                        repository=repository,
+                        name=item["name"].removeprefix("refs/heads/"),
+                        sha=item.get("objectId"),
+                        provider_payload=item,
+                    )
+                )
+                if len(branches) >= limit:
+                    break
+            continuation = response.headers.get("x-ms-continuationtoken")
+            if not continuation or not page:
+                break
+        return branches[:limit]
 
     async def get_file(self, repository: SourceRepositoryRef, path: str, ref: str) -> SourceFile:
-        response = await self.client.get(
+        data = await self._request(
+            "GET",
             f"/git/repositories/{repository.external_id}/items",
             params={
                 "api-version": "7.1",
@@ -137,8 +158,6 @@ class AzureDevOpsSourceProvider:
                 "includeContent": "true",
             },
         )
-        response.raise_for_status()
-        data = response.json()
         return SourceFile(
             repository=repository,
             path=path,
@@ -156,7 +175,8 @@ class AzureDevOpsSourceProvider:
         target_branch: str,
         body: str,
     ) -> SourcePullRequest:
-        response = await self.client.post(
+        data = await self._request(
+            "POST",
             f"/git/repositories/{repository.external_id}/pullrequests",
             params={"api-version": "7.1"},
             json={
@@ -167,8 +187,6 @@ class AzureDevOpsSourceProvider:
                 "isDraft": True,
             },
         )
-        response.raise_for_status()
-        data = response.json()
         return SourcePullRequest(
             provider=SourceProviderKind.AZURE_DEVOPS,
             external_id=str(data["pullRequestId"]),
@@ -184,7 +202,8 @@ class AzureDevOpsSourceProvider:
     async def add_pr_comment(
         self, repository: SourceRepositoryRef, pr_external_id: str, body: str
     ) -> ProviderMutationResult:
-        response = await self.client.post(
+        data = await self._request(
+            "POST",
             f"/git/repositories/{repository.external_id}/pullRequests/{pr_external_id}/threads",
             params={"api-version": "7.1"},
             json={
@@ -192,8 +211,6 @@ class AzureDevOpsSourceProvider:
                 "status": 1,
             },
         )
-        response.raise_for_status()
-        data = response.json()
         return ProviderMutationResult(
             provider=SourceProviderKind.AZURE_DEVOPS,
             ok=True,

@@ -16,10 +16,13 @@ from ado_swarm.contracts.source_provider import (
     SourcePullRequest,
     SourceRepositoryRef,
 )
+from ado_swarm.tools.source_providers.base import HttpProviderMixin
 
 
-class GitHubSourceProvider:
+class GitHubSourceProvider(HttpProviderMixin):
     provider_name = SourceProviderKind.GITHUB.value
+
+    _page_size = 100
 
     def __init__(self, token: str, owner: str) -> None:
         self.owner = owner
@@ -62,31 +65,45 @@ class GitHubSourceProvider:
             provider_payload=data,
         )
 
+    @staticmethod
+    def _has_next_page(response: httpx.Response) -> bool:
+        return 'rel="next"' in response.headers.get("Link", "")
+
     async def get_issue(self, external_id: str) -> SourceIssue:
         repo, number = external_id.split("#", 1)
         repo_ref = await self.get_repository(self.owner, repo)
-        response = await self.client.get(f"/repos/{self.owner}/{repo}/issues/{number}")
-        response.raise_for_status()
-        return self._issue(response.json(), repo_ref)
+        data = await self._request("GET", f"/repos/{self.owner}/{repo}/issues/{number}")
+        return self._issue(data, repo_ref)
 
     async def search_issues(self, query: str, *, limit: int = 50) -> SourceIssuePage:
         q = f"{query} org:{self.owner}" if "org:" not in query and "repo:" not in query else query
-        response = await self.client.get(
-            "/search/issues", params={"q": q, "per_page": min(limit, 100)}
-        )
-        response.raise_for_status()
-        items = [self._issue(item) for item in response.json().get("items", [])[:limit]]
+        items: list[SourceIssue] = []
+        page = 1
+        while len(items) < limit:
+            per_page = min(self._page_size, limit - len(items))
+            response = await self._raw_request(
+                "GET",
+                "/search/issues",
+                params={"q": q, "per_page": per_page, "page": page},
+            )
+            data = self._json_or_raise(response, "GET", "/search/issues")
+            results = data.get("items", [])
+            for item in results:
+                items.append(self._issue(item))
+                if len(items) >= limit:
+                    break
+            if not results or not self._has_next_page(response):
+                break
+            page += 1
         return SourceIssuePage(
-            provider=SourceProviderKind.GITHUB, items=items, query=query, limit=limit
+            provider=SourceProviderKind.GITHUB, items=items[:limit], query=query, limit=limit
         )
 
     async def add_issue_comment(self, external_id: str, body: str) -> ProviderMutationResult:
         repo, number = external_id.split("#", 1)
-        response = await self.client.post(
-            f"/repos/{self.owner}/{repo}/issues/{number}/comments", json={"body": body}
+        data = await self._request(
+            "POST", f"/repos/{self.owner}/{repo}/issues/{number}/comments", json={"body": body}
         )
-        response.raise_for_status()
-        data = response.json()
         return ProviderMutationResult(
             provider=SourceProviderKind.GITHUB,
             ok=True,
@@ -97,36 +114,44 @@ class GitHubSourceProvider:
         )
 
     async def get_repository(self, owner_or_project: str, name: str) -> SourceRepositoryRef:
-        response = await self.client.get(f"/repos/{owner_or_project}/{name}")
-        response.raise_for_status()
-        return self._repo_ref(response.json())
+        data = await self._request("GET", f"/repos/{owner_or_project}/{name}")
+        return self._repo_ref(data)
 
     async def list_branches(
         self, repository: SourceRepositoryRef, *, limit: int = 100
     ) -> list[SourceBranch]:
-        response = await self.client.get(
-            f"/repos/{repository.owner_or_project}/{repository.name}/branches",
-            params={"per_page": min(limit, 100)},
-        )
-        response.raise_for_status()
-        return [
-            SourceBranch(
-                repository=repository,
-                name=item["name"],
-                sha=item.get("commit", {}).get("sha"),
-                protected=item.get("protected", False),
-                provider_payload=item,
+        url = f"/repos/{repository.owner_or_project}/{repository.name}/branches"
+        branches: list[SourceBranch] = []
+        page = 1
+        while len(branches) < limit:
+            per_page = min(self._page_size, limit - len(branches))
+            response = await self._raw_request(
+                "GET", url, params={"per_page": per_page, "page": page}
             )
-            for item in response.json()[:limit]
-        ]
+            data = self._json_or_raise(response, "GET", url)
+            for item in data:
+                branches.append(
+                    SourceBranch(
+                        repository=repository,
+                        name=item["name"],
+                        sha=item.get("commit", {}).get("sha"),
+                        protected=item.get("protected", False),
+                        provider_payload=item,
+                    )
+                )
+                if len(branches) >= limit:
+                    break
+            if not data or not self._has_next_page(response):
+                break
+            page += 1
+        return branches[:limit]
 
     async def get_file(self, repository: SourceRepositoryRef, path: str, ref: str) -> SourceFile:
-        response = await self.client.get(
+        data = await self._request(
+            "GET",
             f"/repos/{repository.owner_or_project}/{repository.name}/contents/{path}",
             params={"ref": ref},
         )
-        response.raise_for_status()
-        data = response.json()
         content = (
             base64.b64decode(data.get("content", "")).decode()
             if data.get("encoding") == "base64"
@@ -149,7 +174,8 @@ class GitHubSourceProvider:
         target_branch: str,
         body: str,
     ) -> SourcePullRequest:
-        response = await self.client.post(
+        data = await self._request(
+            "POST",
             f"/repos/{repository.owner_or_project}/{repository.name}/pulls",
             json={
                 "title": title,
@@ -159,8 +185,6 @@ class GitHubSourceProvider:
                 "draft": True,
             },
         )
-        response.raise_for_status()
-        data = response.json()
         return SourcePullRequest(
             provider=SourceProviderKind.GITHUB,
             external_id=str(data["number"]),
@@ -176,12 +200,11 @@ class GitHubSourceProvider:
     async def add_pr_comment(
         self, repository: SourceRepositoryRef, pr_external_id: str, body: str
     ) -> ProviderMutationResult:
-        response = await self.client.post(
+        data = await self._request(
+            "POST",
             f"/repos/{repository.owner_or_project}/{repository.name}/issues/{pr_external_id}/comments",
             json={"body": body},
         )
-        response.raise_for_status()
-        data = response.json()
         return ProviderMutationResult(
             provider=SourceProviderKind.GITHUB,
             ok=True,
