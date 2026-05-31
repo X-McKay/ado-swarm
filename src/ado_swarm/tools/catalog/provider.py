@@ -28,7 +28,7 @@ async def provider_search_issues_impl(query: str, limit: int = 25) -> dict:
 async def provider_get_repo_metadata_impl(repository: dict) -> dict:
     repo = SourceRepositoryRef.model_validate(repository)
     provider = build_source_provider(get_settings())
-    metadata = await provider.get_repository(repo)
+    metadata = await provider.get_repository(repo.owner_or_project, repo.name)
     return metadata.model_dump(mode="json")
 
 
