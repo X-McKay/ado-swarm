@@ -9,7 +9,9 @@ class KnowledgeStore:
     episodes: list[dict[str, Any]] = field(default_factory=list)
 
     async def healthcheck(self) -> dict[str, str]:
-        return {"status": "ok", "backend": "in-memory-graphiti-compatible"}
+        # Be honest: the in-memory backend is not a durable knowledge graph, so a
+        # readiness probe should see it as degraded rather than fully "ok".
+        return {"status": "degraded", "backend": "in-memory-graphiti-compatible"}
 
     async def add_episode(self, name: str, content: dict[str, Any]) -> str:
         episode_id = f"episode-{len(self.episodes) + 1}"
