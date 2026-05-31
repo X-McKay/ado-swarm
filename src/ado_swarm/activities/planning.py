@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+from temporalio import activity
+
 from ado_swarm.contracts.mission import PlanVersion, TaskSpec
 
 
+@activity.defn(name="plan_mission")
 async def plan_mission(run_id: str, goal: str) -> PlanVersion:
     tasks = [
         TaskSpec(

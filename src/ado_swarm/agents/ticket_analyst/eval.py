@@ -6,10 +6,10 @@ import json
 from pathlib import Path
 from uuid import uuid4
 
+from ado_swarm.agents.eval_support import build_eval_model_gateway
 from ado_swarm.agents.ticket_analyst.main import build_agent
 from ado_swarm.contracts.mission import AgentInvocation, TaskSpec
 from ado_swarm.contracts.source_provider import SourceIssue
-from ado_swarm.model_gateway.gateway import ModelGateway, ModelProfile
 from ado_swarm.tools.source_providers.stub import StubSourceProvider
 
 FIXTURE_PATH = Path("src/ado_swarm/agents/ticket_analyst/fixtures/codeql_sast_issue.json")
@@ -20,7 +20,7 @@ def load_fixture_issue() -> SourceIssue:
 
 
 async def _evaluate_issue(model_profile: str, issue: SourceIssue) -> dict:
-    agent = build_agent(ModelGateway(ModelProfile(provider=model_profile)))
+    agent = build_agent(build_eval_model_gateway(model_profile))
     task = TaskSpec(
         run_id="eval-run",
         title="Evaluate Ticket Analyst",

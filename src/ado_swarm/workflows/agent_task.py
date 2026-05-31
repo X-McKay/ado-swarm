@@ -20,11 +20,12 @@ class AgentTaskWorkflow:
             plan_version=plan_version,
             idempotency_key=f"{run_id}:{task.task_id}",
         )
-        result = await workflow.execute_activity(
+        raw_result = await workflow.execute_activity(
             "run_agent",
             args=[invocation],
             start_to_close_timeout=timedelta(seconds=task.timeout_seconds),
         )
+        result = AgentResult.model_validate(raw_result)
         if result.state != TaskState.COMPLETED:
             return result
         return result

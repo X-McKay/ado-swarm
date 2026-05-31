@@ -6,7 +6,7 @@ from temporalio import workflow
 
 with workflow.unsafe.imports_passed_through():
     from ado_swarm.contracts.events import RunStatus, TaskState
-    from ado_swarm.contracts.mission import RunSnapshot
+    from ado_swarm.contracts.mission import AgentResult, PlanVersion, RunSnapshot
     from ado_swarm.domain.plan_validation import validate_plan
     from ado_swarm.workflows.agent_task import AgentTaskWorkflow
 
@@ -19,9 +19,10 @@ class SupervisorWorkflow:
     @workflow.run
     async def run(self, run_id: str, goal: str) -> RunSnapshot:
         self.snapshot = RunSnapshot(run_id=run_id, status=RunStatus.PLANNING, goal=goal)
-        plan = await workflow.execute_activity(
+        raw_plan = await workflow.execute_activity(
             "plan_mission", args=[run_id, goal], start_to_close_timeout=timedelta(seconds=30)
         )
+        plan = PlanVersion.model_validate(raw_plan)
         validate_plan(plan)
         self.snapshot.current_plan_version = plan.version
         self.snapshot.status = RunStatus.RUNNING
@@ -39,11 +40,12 @@ class SupervisorWorkflow:
                 return self.snapshot
             for task in runnable:
                 self.snapshot.task_states[task.task_id] = TaskState.RUNNING
-                result = await workflow.execute_child_workflow(
+                raw_result = await workflow.execute_child_workflow(
                     AgentTaskWorkflow.run,
                     args=[run_id, task, plan.version],
                     id=f"agent-task:{run_id}:{task.task_id}",
                 )
+                result = AgentResult.model_validate(raw_result)
                 self.snapshot.task_states[task.task_id] = result.state
                 if result.state != TaskState.COMPLETED:
                     self.snapshot.status = RunStatus.FAILED

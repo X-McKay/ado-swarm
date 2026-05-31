@@ -6,13 +6,13 @@ import json
 from pathlib import Path
 from uuid import uuid4
 
+from ado_swarm.agents.eval_support import build_eval_model_gateway
 from ado_swarm.agents.qa_lead.main import build_agent
 from ado_swarm.contracts.mission import AgentInvocation, TaskSpec
-from ado_swarm.model_gateway.gateway import ModelGateway, ModelProfile
 
 
 async def run_eval(model_profile: str = "fake") -> dict:
-    agent = build_agent(ModelGateway(ModelProfile(provider=model_profile)))
+    agent = build_agent(build_eval_model_gateway(model_profile))
     task = TaskSpec(
         run_id="eval-run",
         title="Evaluate QA Lead",
