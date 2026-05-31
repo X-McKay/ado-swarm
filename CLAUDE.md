@@ -24,11 +24,16 @@ just test           # unit tests only
 just test-workflow  # Temporal workflow tests (skip locally if the test-server binary is unavailable)
 just eval-agents    # every agent's golden eval on the deterministic `fake` model
 just format         # ruff format + autofix
-uv run python -m ado_swarm.agents.<id>.eval --model-profile fake   # one agent in isolation
-MODEL_PROVIDER=ollama just eval-agents                              # against a real local model
+
+# isolated agent/skill harness
+just agent-run <id> --source-issue f.json            # run one agent against a fixture (add --model-profile ollama)
+uv run python -m ado_swarm.agents.<id>.eval --model-profile fake   # one agent's golden eval
+just skills-list / just skills-show <name> / just skills-lint
+just new-agent <id> / just new-tool <name> <area> / just new-skill <name>
+MODEL_PROVIDER=ollama just eval-agents                # evals against a real local model
 ```
 
-`uv` runs everything; `mise` pins tools. CI mirrors `just check` (the workflow is a template at `docs/ci/github-actions-ci.yml` because the bot can't push `.github/workflows/`).
+`uv` runs everything; `mise` pins tools. CI (`.github/workflows/ci.yml`) mirrors `just check` plus `eval-agents` on the `fake` profile.
 
 ## Layout
 

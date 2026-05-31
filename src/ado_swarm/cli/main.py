@@ -126,5 +126,114 @@ def resume_run(workflow_id: str) -> None:
     typer.echo(json.dumps(asyncio.run(_run()), indent=2))
 
 
+agents_app = typer.Typer(no_args_is_help=True)
+app.add_typer(agents_app, name="agents")
+skills_app = typer.Typer(no_args_is_help=True)
+app.add_typer(skills_app, name="skills")
+scaffold_app = typer.Typer(no_args_is_help=True)
+app.add_typer(scaffold_app, name="scaffold")
+
+
+@agents_app.command("run")
+def agents_run(
+    agent_id: str,
+    casefile: str | None = None,
+    source_issue: str | None = None,
+    model_profile: str = "fake",
+    approved: bool = False,
+) -> None:
+    """Run one agent in isolation against a fixture and print its AgentResult.
+
+    No Temporal/Postgres needed. Use --model-profile ollama to exercise a real model.
+    """
+    from ado_swarm.agents.eval_support import build_eval_model_gateway, eval_invocation
+    from ado_swarm.agents.registry import build_agent
+
+    constraints: dict = {}
+    if casefile:
+        constraints["casefile"] = json.loads(Path(casefile).read_text())
+    if source_issue:
+        constraints["source_issue"] = json.loads(Path(source_issue).read_text())
+    if approved:
+        constraints["approved"] = True
+
+    async def _run() -> dict:
+        agent = build_agent(agent_id, model_gateway=build_eval_model_gateway(model_profile))
+        invocation = eval_invocation(
+            agent_id, objective=f"Run {agent_id} in isolation.", constraints=constraints
+        )
+        result = await agent.run(invocation)
+        return result.model_dump(mode="json")
+
+    typer.echo(json.dumps(asyncio.run(_run()), indent=2))
+
+
+@skills_app.command("list")
+def skills_list() -> None:
+    from ado_swarm.skills.loader import list_skills
+
+    for name in list_skills():
+        typer.echo(name)
+
+
+@skills_app.command("show")
+def skills_show(name: str) -> None:
+    from ado_swarm.skills.loader import SKILLS_DIR
+
+    path = SKILLS_DIR / name / "SKILL.md"
+    if not path.exists():
+        typer.echo(f"Unknown skill: {name}", err=True)
+        raise typer.Exit(code=1)
+    typer.echo(path.read_text())
+
+
+@skills_app.command("lint")
+def skills_lint() -> None:
+    """Validate every SKILL.md loads (strict) and every pack references known skills."""
+    from strands import Skill
+
+    from ado_swarm.skills.loader import SKILLS_DIR, list_skills, validate_packs
+
+    invalid_skills: dict[str, str] = {}
+    for name in list_skills():
+        try:
+            Skill.from_file(SKILLS_DIR / name / "SKILL.md", strict=True)
+        except Exception as exc:  # surface any validation issue
+            invalid_skills[name] = f"{type(exc).__name__}: {exc}"
+    payload = {
+        "invalid_skills": invalid_skills,
+        "invalid_packs": validate_packs(),
+        "ok": not invalid_skills and not validate_packs(),
+    }
+    typer.echo(json.dumps(payload, indent=2))
+    if not payload["ok"]:
+        raise typer.Exit(code=1)
+
+
+@scaffold_app.command("agent")
+def scaffold_agent_cmd(
+    agent_id: str, section_field: str = "TODO_section", tool: str = "TODO_tool"
+) -> None:
+    from ado_swarm.cli.scaffold import scaffold_agent
+
+    created = scaffold_agent(agent_id, section_field=section_field, tool=tool)
+    for path in created:
+        typer.echo(f"created {path}")
+
+
+@scaffold_app.command("tool")
+def scaffold_tool_cmd(name: str, area: str) -> None:
+    from ado_swarm.cli.scaffold import scaffold_tool
+
+    typer.echo(f"created/updated {scaffold_tool(name, area)} (remember to register it in CATALOG)")
+
+
+@scaffold_app.command("skill")
+def scaffold_skill_cmd(name: str, description: str = "TODO: when to use this skill") -> None:
+    from ado_swarm.cli.scaffold import scaffold_skill
+
+    typer.echo(f"created {scaffold_skill(name, description)}")
+
+
 if __name__ == "__main__":
     app()
