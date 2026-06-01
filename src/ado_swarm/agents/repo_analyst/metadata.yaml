@@ -16,6 +16,8 @@ tools:
   allowed:
     - resolve_repository
     - verify_file_location
+    - repo_grep
+    - repo_parse_manifest
   denied:
     - provider_create_draft_pr
     - git_write

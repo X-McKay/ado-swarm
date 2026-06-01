@@ -6,6 +6,8 @@ the deterministic, policy-gated provider reads.
 
 from __future__ import annotations
 
+import re
+
 from strands import tool
 
 from ado_swarm.config import get_settings
@@ -73,3 +75,102 @@ async def verify_file_location(repository: dict, path: str, ref: str = "main") -
         A JSON object: file_exists (bool), ref, sha, and evidence strings.
     """
     return await verify_file_location_impl(repository, path, ref)
+
+
+MAX_GREP_MATCHES = 50
+
+
+async def repo_grep_impl(repository: dict, path: str, pattern: str, ref: str = "main") -> dict:
+    """Search a single file's content for a regex pattern (read-only)."""
+    repo = SourceRepositoryRef.model_validate(repository)
+    provider = build_source_provider(get_settings())
+    try:
+        source_file = await provider.get_file(repo, path, ref)
+    except Exception as exc:
+        return {"found": False, "matches": [], "error": f"{type(exc).__name__}: {exc}"}
+    try:
+        regex = re.compile(pattern)
+    except re.error as exc:
+        return {"found": False, "matches": [], "error": f"invalid pattern: {exc}"}
+    matches: list[dict] = []
+    for lineno, line in enumerate(source_file.content.splitlines(), start=1):
+        if regex.search(line):
+            matches.append({"line": lineno, "text": line.strip()[:200]})
+            if len(matches) >= MAX_GREP_MATCHES:
+                break
+    return {
+        "found": bool(matches),
+        "path": path,
+        "ref": source_file.ref,
+        "match_count": len(matches),
+        "matches": matches,
+    }
+
+
+def parse_manifest_impl(content: str, path: str) -> dict:
+    """Extract dependency-ish (name, version) hints from a manifest's text (deterministic)."""
+    deps: list[dict] = []
+    lower = path.lower()
+    if lower.endswith(("requirements.txt", ".txt")):
+        for line in content.splitlines():
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            m = re.match(r"^([A-Za-z0-9._-]+)\s*(==|>=|<=|~=|>|<)\s*([0-9][\w.+-]*)", line)
+            if m:
+                deps.append({"name": m.group(1), "version": m.group(3)})
+    else:
+        # Generic "name": "version" / name = "version" pairs (package.json, toml, etc.)
+        for m in re.finditer(
+            r'["\']?([A-Za-z0-9._@/-]+)["\']?\s*[:=]\s*["\']([\^~>=<]*[0-9][\w.+-]*)["\']',
+            content,
+        ):
+            deps.append({"name": m.group(1), "version": m.group(2)})
+    return {"path": path, "dependency_count": len(deps), "dependencies": deps[:200]}
+
+
+async def repo_parse_manifest_impl(repository: dict, path: str, ref: str = "main") -> dict:
+    repo = SourceRepositoryRef.model_validate(repository)
+    provider = build_source_provider(get_settings())
+    try:
+        source_file = await provider.get_file(repo, path, ref)
+    except Exception as exc:
+        return {"path": path, "dependency_count": 0, "dependencies": [], "error": str(exc)}
+    return parse_manifest_impl(source_file.content, path)
+
+
+@tool
+async def repo_grep(repository: dict, path: str, pattern: str, ref: str = "main") -> dict:
+    """Search a repository file's content for a regex pattern (read-only).
+
+    Use this to confirm a flagged code pattern is actually present at a location
+    (evidence for adjudication), or to locate a symbol/usage.
+
+    Args:
+        repository: A SourceRepositoryRef JSON object.
+        path: The file path to search.
+        pattern: A Python regular expression.
+        ref: The git ref/branch (defaults to "main").
+
+    Returns:
+        A JSON object: found (bool), match_count, and matches [{line, text}].
+    """
+    return await repo_grep_impl(repository, path, pattern, ref)
+
+
+@tool
+async def repo_parse_manifest(repository: dict, path: str, ref: str = "main") -> dict:
+    """Parse a dependency manifest into (name, version) pairs (read-only).
+
+    Use this on a manifest (requirements.txt, package.json, pyproject.toml, etc.)
+    to confirm the vulnerable package/version a dependency finding refers to.
+
+    Args:
+        repository: A SourceRepositoryRef JSON object.
+        path: The manifest path.
+        ref: The git ref/branch (defaults to "main").
+
+    Returns:
+        A JSON object: path, dependency_count, dependencies [{name, version}].
+    """
+    return await repo_parse_manifest_impl(repository, path, ref)

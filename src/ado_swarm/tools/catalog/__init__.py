@@ -17,12 +17,22 @@ from ado_swarm.tools.catalog.provider import (
     provider_get_repo_metadata,
     provider_search_issues,
 )
+from ado_swarm.tools.catalog.provider_write import (
+    provider_add_issue_comment,
+    provider_add_pr_comment,
+    provider_create_draft_pr,
+)
 from ado_swarm.tools.catalog.readiness import assess_readiness
 from ado_swarm.tools.catalog.remediation import (
     apply_remediation_change,
     propose_remediation_strategy,
 )
-from ado_swarm.tools.catalog.repository import resolve_repository, verify_file_location
+from ado_swarm.tools.catalog.repository import (
+    repo_grep,
+    repo_parse_manifest,
+    resolve_repository,
+    verify_file_location,
+)
 from ado_swarm.tools.catalog.risk import score_severity
 from ado_swarm.tools.catalog.triage import normalize_finding
 from ado_swarm.tools.catalog.validation import propose_validation_checks
@@ -32,6 +42,8 @@ CATALOG: dict[str, Any] = {
     "normalize_finding": normalize_finding,
     "resolve_repository": resolve_repository,
     "verify_file_location": verify_file_location,
+    "repo_grep": repo_grep,
+    "repo_parse_manifest": repo_parse_manifest,
     "score_severity": score_severity,
     "adjudication_signals": adjudication_signals,
     "propose_remediation_strategy": propose_remediation_strategy,
@@ -48,6 +60,10 @@ CATALOG: dict[str, Any] = {
     "provider_get_issue": provider_get_issue,
     "provider_search_issues": provider_search_issues,
     "provider_get_repo_metadata": provider_get_repo_metadata,
+    # Provider write tools (approval-gated; declare in an agent's write_tool_names)
+    "provider_create_draft_pr": provider_create_draft_pr,
+    "provider_add_issue_comment": provider_add_issue_comment,
+    "provider_add_pr_comment": provider_add_pr_comment,
 }
 
 

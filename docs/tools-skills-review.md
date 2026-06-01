@@ -12,7 +12,10 @@ The wiring table below reflects the original snapshot; subsequently delivered on
 - **Bounded adjudication swarm** for `security_reviewer` (ADR-0009), opt-in + eval-gated.
 - All 26 `SKILL.md` bodies replaced with real, distinct guidance referencing only real catalog tools.
 
-Catalog is now 16 tools. Still open: repository-investigation tools (`repo_grep`, `git_log_path`), real provider write tools for the draft-PR path, and a real Graphiti/Neo4j backend behind `KnowledgeStore`.
+- **Repository-investigation tools** `repo_grep` / `repo_parse_manifest` (`tools/catalog/repository.py`) wired into `repo_analyst` — confirm a flagged code pattern is present and parse a dependency manifest for the affected package/version.
+- **Provider write tools** `provider_create_draft_pr` / `provider_add_issue_comment` / `provider_add_pr_comment` (`tools/catalog/provider_write.py`) — WRITE, approval-gated (require an approved `ToolContext`; declare in `write_tool_names`). The draft-PR path is now available behind approval.
+
+Catalog is now 21 tools. Still open: a real Graphiti/Neo4j backend behind `KnowledgeStore`; wiring the write tools into a submission/PR-prep agent (the orphan `pull-request-preparation` / `ticket-disposition-update` skills); a true git-history tool once the provider port exposes commit history.
 
 ## 1. Current wiring
 

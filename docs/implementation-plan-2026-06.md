@@ -16,9 +16,11 @@
 - **Phase 3 (DX) — done.** `ado-swarm agents run` / `skills list|show|lint` / `scaffold agent|tool|skill`; `just` recipes; `CLAUDE.md`; `ado-swarm-add-agent` Claude skill; docs + ADR-0008 sweep.
 - **Phase 4 — in progress.** Done: asyncpg connection pooling + versioned migration runner; source-provider hardening (async-ctx lifecycle, `_request` helper, 429/Retry-After retries, pagination, `ProviderError`); real token/budget capture into `AgentResult.budget_usage`; honest `/health`; knowledge tools (`graphiti_search`/`graphiti_add_episode`) + provider-read tools (`provider_get_issue`/`provider_search_issues`/`provider_get_repo_metadata`), recall wired into `security_reviewer`; collapsed the duplicate plan/DAG into one graph template (review §3.1); all 26 `SKILL.md` bodies rewritten with real guidance. Remaining: real Graphiti/Neo4j `KnowledgeStore` backend; OTel GenAI tracing; provider-contract semantics pinning (`external_id`, mutation-result ids).
 - **Verification governor — done.** Sandboxed, allowlisted `run_validation_command` (`tools/catalog/verification.py` + `sandbox/provider.py::run_command`) wired into `test_engineer`: tests/lint/build are *run* (not just proposed), non-zero exit is a hard failure (the harness "governor").
-- **Not started.** Repository-investigation tools (`repo_grep`, `git_log_path`); real provider write tools for the draft-PR path; a real Graphiti/Neo4j backend behind `KnowledgeStore`; OTel GenAI tracing; provider-contract semantics pinning; promoting the swarm default after an eval comparison.
+- **Repository-investigation tools — done.** `repo_grep` (confirm a flagged pattern is present) and `repo_parse_manifest` (confirm the vulnerable package/version) wired into `repo_analyst`.
+- **Provider write tools — done.** `provider_create_draft_pr` (draft only), `provider_add_issue_comment`, `provider_add_pr_comment` (`tools/catalog/provider_write.py`) — WRITE tools that require an approved `ToolContext` via the policy gate; declare them in an agent's `write_tool_names`. The draft-PR path is now available behind approval (no agent enables them by default yet).
+- **Not started.** A real Graphiti/Neo4j backend behind `KnowledgeStore`; OTel GenAI tracing; provider-contract semantics pinning; wiring the write tools into a submission agent; promoting the swarm default after an eval comparison.
 
-Gate status: `ruff` + `ruff format` + `ty` clean; 132 unit/workflow tests pass (4 skipped); `eval-agents` 9/9 on `fake`; tool catalog = 16 tools.
+Gate status: `ruff` + `ruff format` + `ty` clean; 143 unit/workflow tests pass (4 skipped); `eval-agents` 9/9 on `fake`; tool catalog = 21 tools.
 
 ---
 
