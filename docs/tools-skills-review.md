@@ -15,7 +15,10 @@ The wiring table below reflects the original snapshot; subsequently delivered on
 - **Repository-investigation tools** `repo_grep` / `repo_parse_manifest` (`tools/catalog/repository.py`) wired into `repo_analyst` — confirm a flagged code pattern is present and parse a dependency manifest for the affected package/version.
 - **Provider write tools** `provider_create_draft_pr` / `provider_add_issue_comment` / `provider_add_pr_comment` (`tools/catalog/provider_write.py`) — WRITE, approval-gated (require an approved `ToolContext`; declare in `write_tool_names`). The draft-PR path is now available behind approval.
 
-Catalog is now 21 tools. Still open: a real Graphiti/Neo4j backend behind `KnowledgeStore`; wiring the write tools into a submission/PR-prep agent (the orphan `pull-request-preparation` / `ticket-disposition-update` skills); a true git-history tool once the provider port exposes commit history.
+- **Real Graphiti/Neo4j `KnowledgeStore`** (`GraphitiKnowledgeStore`, `knowledge_backend=graphiti`) behind the `KnowledgeStorePort`; in-memory remains the default.
+- **`submission_engineer` agent** consumes the approval-gated write tools to prepare a draft PR + disposition (`SubmissionResult`), activating the `pull-request-preparation` / `ticket-disposition-update` skills.
+
+Catalog is now 21 tools across 10 agents. Still open: a true git-history tool once the provider port exposes commit history; OTel tracing; wiring `submission_engineer` into the default Temporal pipeline behind an approval gate.
 
 ## 1. Current wiring
 

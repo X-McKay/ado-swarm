@@ -18,9 +18,11 @@
 - **Verification governor — done.** Sandboxed, allowlisted `run_validation_command` (`tools/catalog/verification.py` + `sandbox/provider.py::run_command`) wired into `test_engineer`: tests/lint/build are *run* (not just proposed), non-zero exit is a hard failure (the harness "governor").
 - **Repository-investigation tools — done.** `repo_grep` (confirm a flagged pattern is present) and `repo_parse_manifest` (confirm the vulnerable package/version) wired into `repo_analyst`.
 - **Provider write tools — done.** `provider_create_draft_pr` (draft only), `provider_add_issue_comment`, `provider_add_pr_comment` (`tools/catalog/provider_write.py`) — WRITE tools that require an approved `ToolContext` via the policy gate; declare them in an agent's `write_tool_names`. The draft-PR path is now available behind approval (no agent enables them by default yet).
-- **Not started.** A real Graphiti/Neo4j backend behind `KnowledgeStore`; OTel GenAI tracing; provider-contract semantics pinning; wiring the write tools into a submission agent; promoting the swarm default after an eval comparison.
+- **Real KnowledgeStore backend — done.** `GraphitiKnowledgeStore` (Neo4j-backed via `graphiti-core`, lazy-imported, graceful degrade) selectable by `knowledge_backend=memory|graphiti`; `KnowledgeStorePort` Protocol; in-memory stays the default.
+- **Submission agent — done.** `submission_engineer` consumes the approval-gated write tools (`provider_create_draft_pr`, `provider_add_issue_comment` in `write_tool_names`) to prepare a DRAFT PR + ticket disposition (`SubmissionResult` section), activating the `pull-request-preparation` / `ticket-disposition-update` skills.
+- **Not started.** OTel GenAI tracing; provider-contract semantics pinning (`external_id`, mutation-result ids); a true git-history tool; promoting the swarm default after an eval comparison; wiring `submission_engineer` into the default Temporal pipeline behind an approval gate.
 
-Gate status: `ruff` + `ruff format` + `ty` clean; 143 unit/workflow tests pass (4 skipped); `eval-agents` 9/9 on `fake`; tool catalog = 21 tools.
+Gate status: `ruff` + `ruff format` + `ty` clean; 153 unit/workflow tests pass (4 skipped); `eval-agents` 10/10 on `fake`; tool catalog = 21 tools; 10 agents.
 
 ---
 

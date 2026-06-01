@@ -53,6 +53,7 @@ Agents are model-driven: `main.py` declares which catalog **tools** the agent ma
 | `solutions_architect` | Solutions Architect | `remediation_plan` | Produces bounded remediation plans. |
 | `test_engineer` | Test Engineer | `validation` | Defines validation/build checks and review readiness. |
 | `software_engineer` | Software Engineer | `execution` | Applies changes in an isolated sandbox (write, approval-gated). |
+| `submission_engineer` | Submission Engineer | `submission` | Prepares the draft PR + ticket disposition (write, approval-gated). |
 | `qa_lead` | QA Lead | `readiness` | Decides phase readiness for the casefile. |
 | `data_analyst` | Data Analyst | `CampaignReport` (artifact) | Mines findings for campaign patterns. |
 

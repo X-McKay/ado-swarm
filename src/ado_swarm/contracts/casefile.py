@@ -91,6 +91,16 @@ class ReadinessVerdict(BaseModel):
     rationale: str = ""
 
 
+class SubmissionResult(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    submitted: bool = False
+    draft_pr_url: str | None = None
+    disposition_comment: str = ""
+    actions: list[str] = Field(default_factory=list)
+    rationale: str = ""
+
+
 class SecurityCasefile(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -105,6 +115,7 @@ class SecurityCasefile(BaseModel):
     validation: ValidationResult | None = None
     execution: ExecutionResult | None = None
     readiness: ReadinessVerdict | None = None
+    submission: SubmissionResult | None = None
     audit: dict[str, Any] = Field(default_factory=dict)
     final_disposition: Literal[
         "open",

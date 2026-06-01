@@ -19,6 +19,7 @@ class Settings(BaseSettings):
     neo4j_uri: str = "bolt://localhost:7687"
     neo4j_user: str = "neo4j"
     neo4j_password: str = Field(default="", repr=False)
+    knowledge_backend: Literal["memory", "graphiti"] = "memory"
     source_provider: Literal["stub", "azure_devops", "github"] = "stub"
     model_provider: Literal["fake", "ollama", "openai_compatible", "bedrock", "litellm"] = "fake"
     model_id: str = "fake-deterministic"

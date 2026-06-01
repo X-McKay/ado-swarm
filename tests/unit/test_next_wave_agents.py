@@ -9,6 +9,7 @@ from ado_swarm.agents.risk_auditor.eval import run_eval as risk_auditor_eval
 from ado_swarm.agents.security_reviewer.eval import run_eval as security_reviewer_eval
 from ado_swarm.agents.software_engineer.eval import run_eval as software_engineer_eval
 from ado_swarm.agents.solutions_architect.eval import run_eval as solutions_architect_eval
+from ado_swarm.agents.submission_engineer.eval import run_eval as submission_engineer_eval
 from ado_swarm.agents.test_engineer.eval import run_eval as test_engineer_eval
 from ado_swarm.agents.ticket_analyst.eval import run_eval as ticket_analyst_eval
 
@@ -25,6 +26,7 @@ MODEL_DRIVEN_EVALS = {
     "qa_lead": qa_lead_eval,
     "data_analyst": data_analyst_eval,
     "software_engineer": software_engineer_eval,
+    "submission_engineer": submission_engineer_eval,
 }
 
 
