@@ -24,7 +24,10 @@ class SupervisorWorkflow:
 
     @workflow.run
     async def run(self, run_id: str, goal: str) -> RunSnapshot:
-        self.snapshot = RunSnapshot(run_id=run_id, status=RunStatus.PLANNING, goal=goal)
+        # Use the deterministic workflow clock, never wall-clock, inside the workflow.
+        self.snapshot = RunSnapshot(
+            run_id=run_id, status=RunStatus.PLANNING, goal=goal, updated_at=workflow.now()
+        )
         raw_plan = await workflow.execute_activity(
             "plan_mission",
             args=[run_id, goal],
@@ -60,14 +63,41 @@ class SupervisorWorkflow:
                 self.snapshot.blocked_reason = "Plan has unresolved dependencies after validation."
                 return self.snapshot
             for task in runnable:
+                # Approval-gated stage (e.g. submission_engineer): park until a human
+                # approves this specific task, then dispatch it with an approved context
+                # so its write tools (draft PR, comments) pass the policy gate.
+                approved = False
+                if task.constraints.get("requires_approval"):
+                    self.snapshot.task_states[task.task_id] = TaskState.PENDING
+                    self.snapshot.status = RunStatus.WAITING_FOR_APPROVAL
+                    self.snapshot.blocked_reason = f"awaiting approval for {task.title}"
+                    await workflow.wait_condition(
+                        lambda task_id=task.task_id: (
+                            task_id in self.approvals or self.cancel_requested
+                        )
+                    )
+                    if self.cancel_requested:
+                        self.snapshot.status = RunStatus.CANCELLED
+                        self.snapshot.blocked_reason = "cancel requested"
+                        return self.snapshot
+                    decision = self.approvals.get(task.task_id, "")
+                    if decision.startswith("rejected:"):
+                        self.snapshot.status = RunStatus.CANCELLED
+                        self.snapshot.blocked_reason = decision
+                        return self.snapshot
+                    approved = True
+                    self.snapshot.status = RunStatus.RUNNING
+                    self.snapshot.blocked_reason = None
+
                 dependency_artifacts: list[ArtifactRef] = []
                 for dependency_id in task.depends_on:
                     dependency_artifacts.extend(artifacts_by_task.get(dependency_id, []))
-                task_for_run = task
+                updates: dict = {}
                 if dependency_artifacts:
-                    task_for_run = task.model_copy(
-                        update={"input_refs": [*task.input_refs, *dependency_artifacts]}
-                    )
+                    updates["input_refs"] = [*task.input_refs, *dependency_artifacts]
+                if approved:
+                    updates["constraints"] = {**task.constraints, "approved": True}
+                task_for_run = task.model_copy(update=updates) if updates else task
                 self.snapshot.task_states[task.task_id] = TaskState.RUNNING
                 raw_result = await workflow.execute_child_workflow(
                     AgentTaskWorkflow.run,

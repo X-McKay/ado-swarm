@@ -30,7 +30,7 @@ just eval-agent risk_auditor
 just eval-agents
 ```
 
-This allows a developer to change one agent's `main.py`, `metadata.yaml`, or `prompts.md` and verify it in isolation before running the full test suite.
+This allows a developer to change one agent's `main.py`, `metadata.yaml`, or `eval.py` and verify it in isolation before running the full test suite.
 
 ## Quality checks
 

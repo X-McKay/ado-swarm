@@ -10,10 +10,11 @@ skill_packs:
   - triage-readonly
 skills:
   - campaign-discovery
+  - false-positive-pattern-mining
+  - skill-performance-evaluation
 tools:
   allowed:
-    - casefile_read
-    - blackboard_append
+    - summarize_findings
   denied:
     - provider_create_draft_pr
     - git_write

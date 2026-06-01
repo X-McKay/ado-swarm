@@ -15,34 +15,46 @@ class ActivityRetryProfile(StrEnum):
     DEFAULT = "default"
 
 
-def retry_policy(profile: ActivityRetryProfile = ActivityRetryProfile.DEFAULT) -> RetryPolicy:
-    if profile == ActivityRetryProfile.MODEL:
-        return RetryPolicy(
-            initial_interval=timedelta(seconds=2),
-            backoff_coefficient=2.0,
-            maximum_interval=timedelta(seconds=30),
-            maximum_attempts=4,
-            non_retryable_error_types=["PolicyDenied", "InvalidModelRequest"],
-        )
-    if profile == ActivityRetryProfile.PROVIDER_WRITE:
-        return RetryPolicy(
-            initial_interval=timedelta(seconds=5),
-            backoff_coefficient=2.0,
-            maximum_interval=timedelta(minutes=2),
-            maximum_attempts=3,
-            non_retryable_error_types=["PolicyDenied", "ApprovalRequired", "InvalidMutation"],
-        )
-    if profile == ActivityRetryProfile.PROVIDER_READ:
-        return RetryPolicy(
-            initial_interval=timedelta(seconds=1),
-            backoff_coefficient=2.0,
-            maximum_interval=timedelta(seconds=20),
-            maximum_attempts=5,
-        )
+NON_RETRYABLE_BY_PROFILE = {
+    ActivityRetryProfile.MODEL: [
+        "PolicyDenied",
+        "ApprovalRequired",
+        "ValidationFailed",
+        "InvalidModelRequest",
+    ],
+    ActivityRetryProfile.PROVIDER_WRITE: ["PolicyDenied", "ApprovalRequired", "InvalidMutation"],
+    ActivityRetryProfile.PROVIDER_READ: ["PolicyDenied"],
+    ActivityRetryProfile.GRAPH_WRITE: ["PolicyDenied", "ValidationFailed"],
+    ActivityRetryProfile.SANDBOX: ["PolicyDenied", "ApprovalRequired"],
+    ActivityRetryProfile.DEFAULT: ["PolicyDenied", "ApprovalRequired", "ValidationFailed"],
+}
+
+_TIMING_BY_PROFILE = {
+    ActivityRetryProfile.MODEL: (2, 30, 4),
+    ActivityRetryProfile.PROVIDER_WRITE: (5, 120, 3),
+    ActivityRetryProfile.PROVIDER_READ: (1, 20, 5),
+    ActivityRetryProfile.GRAPH_WRITE: (1, 30, 3),
+    ActivityRetryProfile.SANDBOX: (2, 60, 2),
+    ActivityRetryProfile.DEFAULT: (1, 30, 3),
+}
+
+
+def retry_policy(
+    profile: ActivityRetryProfile = ActivityRetryProfile.DEFAULT,
+    *,
+    max_attempts: int | None = None,
+) -> RetryPolicy:
+    """Build a retry policy for a profile.
+
+    Every profile is mapped explicitly (no silent fall-through to DEFAULT), and
+    ``max_attempts`` overrides the profile default so callers can honor a
+    per-task ``TaskSpec.max_attempts``.
+    """
+    initial, maximum, attempts = _TIMING_BY_PROFILE[profile]
     return RetryPolicy(
-        initial_interval=timedelta(seconds=1),
+        initial_interval=timedelta(seconds=initial),
         backoff_coefficient=2.0,
-        maximum_interval=timedelta(seconds=30),
-        maximum_attempts=3,
-        non_retryable_error_types=["PolicyDenied", "ValidationFailed"],
+        maximum_interval=timedelta(seconds=maximum),
+        maximum_attempts=max_attempts if max_attempts is not None else attempts,
+        non_retryable_error_types=NON_RETRYABLE_BY_PROFILE[profile],
     )

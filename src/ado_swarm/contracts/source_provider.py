@@ -29,6 +29,14 @@ class SourceIssue(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     provider: SourceProviderKind
+    # ``external_id`` is the provider's canonical, round-trippable identifier for the
+    # issue/work item — the exact value that ``get_issue(external_id)`` accepts back.
+    #   - azure_devops: the numeric work-item id (e.g. "4821").
+    #   - github: a repo-qualified id "{owner}/{repo}#{number}" when the repository is
+    #     known, otherwise the bare issue number. ``add_issue_comment`` accepts either.
+    #   - stub: an opaque echo id.
+    # Always pass ``SourceIssue.external_id`` back to provider methods verbatim; never
+    # re-derive an id from other fields.
     external_id: str
     url: str
     title: str
@@ -71,6 +79,17 @@ class SourceBranch(BaseModel):
     provider_payload: dict[str, Any] = Field(default_factory=dict)
 
 
+class SourceCommit(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    repository: SourceRepositoryRef
+    sha: str
+    message: str
+    author: str | None = None
+    committed_at: datetime | None = None
+    url: str | None = None
+
+
 class SourcePullRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -85,11 +104,23 @@ class SourcePullRequest(BaseModel):
     provider_payload: dict[str, Any] = Field(default_factory=dict)
 
 
+class MutationResultKind(StrEnum):
+    """What ``ProviderMutationResult.external_id`` identifies for a mutation."""
+
+    ISSUE_COMMENT = "issue_comment"
+    PR_COMMENT = "pr_comment"
+    PULL_REQUEST = "pull_request"
+
+
 class ProviderMutationResult(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     provider: SourceProviderKind
     ok: bool
+    # ``result_kind`` pins what ``external_id`` refers to (the created comment, the
+    # created PR, ...), so callers don't have to guess per-provider. ``external_id``
+    # is the id of the *thing created* by the mutation, not its parent.
+    result_kind: MutationResultKind
     external_id: str | None = None
     url: str | None = None
     message: str

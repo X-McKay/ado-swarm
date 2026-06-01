@@ -8,8 +8,13 @@ from dataclasses import dataclass
 class GraphNodeSpec:
     node_id: str
     agent_id: str
+    title: str = ""
+    objective: str = ""
     depends_on: tuple[str, ...] = ()
     timeout_seconds: int = 300
+    # Write/submission stages whose tools are approval-gated. The planner marks
+    # these tasks so the supervisor parks them for human approval before running.
+    requires_approval: bool = False
 
 
 @dataclass(frozen=True)
@@ -38,16 +43,80 @@ class GraphTemplate:
 
 
 def triage_readonly_graph() -> GraphTemplate:
+    """The single source of truth for the read-only triage pipeline DAG.
+
+    The planner (`activities/planning.py`) builds the mission plan from this
+    template, so the chain is defined exactly once (review §3.1 collapsed the
+    duplicate definitions that previously lived in both the planner and here).
+    """
     return GraphTemplate(
         template_id="triage-readonly",
-        description="Normalize a source issue and perform initial read-only triage.",
+        description="Normalize a source issue and perform read-only triage and planning.",
         nodes=(
-            GraphNodeSpec("ticket", "ticket_analyst"),
-            GraphNodeSpec("repo", "repo_analyst", depends_on=("ticket",)),
-            GraphNodeSpec("security", "security_reviewer", depends_on=("repo",)),
-            GraphNodeSpec("risk", "risk_auditor", depends_on=("security",)),
+            GraphNodeSpec(
+                "ticket_analyst",
+                "ticket_analyst",
+                title="Normalize source issue",
+                objective="Normalize the provider issue into a canonical security casefile.",
+            ),
+            GraphNodeSpec(
+                "repo_analyst",
+                "repo_analyst",
+                title="Collect repository evidence",
+                objective=(
+                    "Resolve repository context and verify the referenced file path when available."
+                ),
+                depends_on=("ticket_analyst",),
+            ),
+            GraphNodeSpec(
+                "security_reviewer",
+                "security_reviewer",
+                title="Adjudicate finding",
+                objective=(
+                    "Decide whether the finding is stale, false positive, already fixed, "
+                    "duplicate, or open."
+                ),
+                depends_on=("repo_analyst",),
+            ),
+            GraphNodeSpec(
+                "risk_auditor",
+                "risk_auditor",
+                title="Assess risk and automation eligibility",
+                objective="Classify risk, impact, and whether automation can proceed safely.",
+                depends_on=("security_reviewer",),
+            ),
+            GraphNodeSpec(
+                "solutions_architect",
+                "solutions_architect",
+                title="Design bounded remediation plan",
+                objective="Create a minimal safe remediation strategy and approval boundary.",
+                depends_on=("risk_auditor",),
+            ),
+            GraphNodeSpec(
+                "test_engineer",
+                "test_engineer",
+                title="Prepare validation checklist",
+                objective=(
+                    "Define validation checks and determine whether the casefile is "
+                    "ready for review."
+                ),
+                depends_on=("solutions_architect",),
+            ),
+            GraphNodeSpec(
+                "submission_engineer",
+                "submission_engineer",
+                title="Prepare draft PR and disposition",
+                objective=(
+                    "After approval, prepare a draft pull request and update the ticket "
+                    "disposition for the validated remediation."
+                ),
+                depends_on=("test_engineer",),
+                # Write tools (draft PR, comments) are approval-gated; this stage parks
+                # for human approval before running.
+                requires_approval=True,
+            ),
         ),
-        max_steps=8,
+        max_steps=14,
         max_concurrency=1,
     )
 

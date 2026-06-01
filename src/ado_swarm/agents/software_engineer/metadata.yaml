@@ -10,11 +10,14 @@ skill_packs:
   - triage-readonly
 skills:
   - dependency-remediation-execution
+  - localized-code-remediation-execution
+  - iac-remediation-execution
 tools:
   allowed:
-    - casefile_read
-    - blackboard_append
+    - apply_remediation_change
+  write:
+    - apply_remediation_change
   denied:
     - provider_create_draft_pr
     - git_write
-risk_tier: low
+risk_tier: medium

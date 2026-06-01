@@ -64,6 +64,43 @@ class RemediationPlan(BaseModel):
     requires_human_approval: bool = True
 
 
+class ValidationResult(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    recommended_checks: list[str] = Field(default_factory=list)
+    ready_for_review: bool = False
+    rationale: str = ""
+
+
+class ExecutionResult(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    applied: bool = False
+    sandbox_session_id: str | None = None
+    changed_files: list[str] = Field(default_factory=list)
+    diff_summary: str = ""
+    rationale: str = ""
+
+
+class ReadinessVerdict(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    ready: bool = False
+    next_phase: str | None = None
+    blocking_reasons: list[str] = Field(default_factory=list)
+    rationale: str = ""
+
+
+class SubmissionResult(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    submitted: bool = False
+    draft_pr_url: str | None = None
+    disposition_comment: str = ""
+    actions: list[str] = Field(default_factory=list)
+    rationale: str = ""
+
+
 class SecurityCasefile(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -75,6 +112,10 @@ class SecurityCasefile(BaseModel):
     adjudication: FindingAdjudication | None = None
     risk: RiskClassification | None = None
     remediation_plan: RemediationPlan | None = None
+    validation: ValidationResult | None = None
+    execution: ExecutionResult | None = None
+    readiness: ReadinessVerdict | None = None
+    submission: SubmissionResult | None = None
     audit: dict[str, Any] = Field(default_factory=dict)
     final_disposition: Literal[
         "open",

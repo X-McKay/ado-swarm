@@ -1,7 +1,7 @@
 ---
 name: remediation-diff-review
-description: Review generated diffs for scope, safety, secrets, regression risk, and policy compliance.
-allowed-tools: provider_get_issue provider_get_repo_metadata casefile_read blackboard_append graphiti_search policy_check_action
+description: Use this skill when reviewing an applied remediation diff for correctness, scope, and risk before it advances toward a pull request.
+allowed-tools: verify_file_location score_severity adjudication_signals graphiti_search
 metadata:
   pack: validation-submission
   maturity: base
@@ -10,20 +10,50 @@ metadata:
 
 ## Objective
 
-Review generated diffs for scope, safety, secrets, regression risk, and policy compliance.
+Act as a critical reviewer of the `execution` diff: confirm it actually fixes the finding,
+stays within scope, and introduces no new risk — yielding an explicit approve/reject with
+specific comments.
 
-## Required inputs
+## When to use
 
-A canonical casefile or task context, provider metadata, available repository evidence, prior audit events, and applicable policy constraints.
+`execution.applied == true` and the diff must be gated before validation/PR.
+
+## Inputs
+
+- `execution`: `diff_summary`, `changed_files`, `sandbox_session_id`.
+- `normalized_finding` (cwe, category, file_path) and `remediation_plan.change_boundary`.
 
 ## Procedure
 
-1. Confirm that the task objective matches this skill and identify missing evidence.
-2. Work only from canonical contracts and explicitly referenced evidence.
-3. Request only tools allowed by the active runtime policy; `allowed-tools` is descriptive, not enforcement.
-4. Produce structured, audit-friendly output with confidence, rationale, evidence references, and stop conditions.
-5. Escalate rather than guess when evidence is missing, ambiguous, sensitive, or outside the safe change boundary.
+1. Cross-check every path in `execution.changed_files` against `remediation_plan.change_boundary`;
+   `verify_file_location` to confirm files exist. Any out-of-boundary file is an automatic reject.
+2. Read the diff hunk-by-hunk: does it address the `cwe` root cause, or merely silence the scanner?
+3. Look for collateral edits (formatting churn, unrelated lines, commented-out code, secrets,
+   debug statements) and flag each.
+4. Use `adjudication_signals` / `score_severity` to sanity-check that residual risk is reduced.
+5. `graphiti_search` for prior reviews of similar diffs to apply consistent standards.
+
+## Decision criteria
+
+- APPROVE only if in-boundary, minimal, root-cause-correct, behavior-preserving, no secrets.
+- REJECT on scope creep, partial fix, likely regression, or a diff that doesn't map to the CWE.
+
+## Checklist
+
+- [ ] All `changed_files` within `change_boundary`.
+- [ ] Diff size proportionate to the fix.
+- [ ] No new secrets, no disabled checks, no `# nosec`/suppression hacks.
 
 ## Output expectations
 
-Return concise findings suitable for inclusion in `AgentResult`, casefile sections, and task audit events. Include activated skill name `remediation-diff-review` in audit metadata.
+A review verdict (approved bool + specific comments + risk flags) feeding the readiness stage.
+
+## Safety
+
+Read-only review — never edit the diff here; rejection routes back to the execution skill. The
+model does not self-certify correctness; tests/build/scanners still govern downstream.
+
+## Escalation
+
+High-risk flags (auth, crypto, IAM, data handling) or uncertainty → reject and recommend
+`needs_human`.

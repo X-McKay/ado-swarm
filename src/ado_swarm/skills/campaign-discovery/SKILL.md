@@ -1,7 +1,7 @@
 ---
 name: campaign-discovery
-description: Discover remediation campaigns across related repositories, packages, scanners, and findings.
-allowed-tools: provider_get_issue provider_get_repo_metadata casefile_read blackboard_append graphiti_search policy_check_action
+description: Use this skill when grouping many related findings into a single coordinated remediation campaign (shared root cause, package, or pattern) for batch handling.
+allowed-tools: summarize_findings graphiti_search provider_search_issues score_severity
 metadata:
   pack: analytics
   maturity: base
@@ -10,20 +10,48 @@ metadata:
 
 ## Objective
 
-Discover remediation campaigns across related repositories, packages, scanners, and findings.
+Detect themes across a finding population — the same vulnerable package, the same CWE recurring
+across repos, or a systemic misconfiguration — and propose a coordinated campaign so they are
+fixed together rather than one ticket at a time. Read/analytics only.
 
-## Required inputs
+## When to use
 
-A canonical casefile or task context, provider metadata, available repository evidence, prior audit events, and applicable policy constraints.
+When a mission spans many findings and per-finding handling would be redundant or inconsistent.
+
+## Inputs
+
+- `normalized_finding` fields across the mission (package_name, cwe, category, scanner, file_path).
+- Severity assessments and cross-mission history via `graphiti_search`.
 
 ## Procedure
 
-1. Confirm that the task objective matches this skill and identify missing evidence.
-2. Work only from canonical contracts and explicitly referenced evidence.
-3. Request only tools allowed by the active runtime policy; `allowed-tools` is descriptive, not enforcement.
-4. Produce structured, audit-friendly output with confidence, rationale, evidence references, and stop conditions.
-5. Escalate rather than guess when evidence is missing, ambiguous, sensitive, or outside the safe change boundary.
+1. `summarize_findings` to bucket findings by candidate campaign keys: `package_name`
+   (fleet-wide dependency), `cwe` (recurring weakness), or IaC misconfig type.
+2. `graphiti_search` for past campaigns on the same theme to reuse a proven fix template.
+3. `provider_search_issues` to detect existing tickets/epics covering the theme (avoid duplicates).
+4. `score_severity` across the cluster to prioritize by aggregate risk and breadth.
+5. Define each campaign: theme, member finding ids, and one recommended action
+   (e.g. "bump lodash to >=4.17.21 across 12 repos").
+
+## Decision criteria
+
+- Group only findings that share a genuine root cause and a common fix; do not force-fit.
+- Prioritize campaigns by aggregate severity x reach x fix uniformity.
+
+## Checklist
+
+- [ ] Each campaign has a crisp theme and a single coherent remediation action.
+- [ ] Members truly share root cause (not just superficial scanner overlap).
+- [ ] Cross-checked against existing provider epics to prevent duplicate effort.
 
 ## Output expectations
 
-Return concise findings suitable for inclusion in `AgentResult`, casefile sections, and task audit events. Include activated skill name `campaign-discovery` in audit metadata.
+Campaign insights (theme, description, member finding ids, recommended_action).
+
+## Safety
+
+Read-only. Discovery proposes batching; it does not itself apply changes or close tickets.
+
+## Escalation
+
+Org-wide or breaking-change campaigns → recommend human program-level coordination.

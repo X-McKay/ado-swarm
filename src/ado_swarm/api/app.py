@@ -27,10 +27,12 @@ async def health() -> dict:
     settings = get_settings()
     provider = build_source_provider(settings)
     knowledge = KnowledgeStore()
+    knowledge_health = await knowledge.healthcheck()
     return {
-        "status": "ok",
+        # Reflect the weakest dependency so readiness probes aren't misled.
+        "status": "ok" if knowledge_health.get("status") == "ok" else "degraded",
         "source_provider": provider.provider_name,
-        "knowledge": await knowledge.healthcheck(),
+        "knowledge": knowledge_health,
     }
 
 

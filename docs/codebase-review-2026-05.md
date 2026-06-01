@@ -4,6 +4,10 @@
 **Scope:** Full codebase — architecture, redundancy, testability, scale, objective-completion, and developer experience (incl. AI tooling).
 **Status of repo at review:** `just check` green (23 unit tests pass, ruff clean, `ty` clean, `eval-agents` passes on the `fake` profile). ~4,100 LOC of `src`, ~310 LOC of tests.
 
+> **Update note (2026-05-31, post-rebase onto `main`).** After the initial review, commit `bb2b443 "Execute full casefile pipeline in Temporal"` landed (ADR-0007). It expands the planner from a 2-task plan to the full **six-agent linear DAG** (`ticket_analyst → repo_analyst → security_reviewer → risk_auditor → solutions_architect → test_engineer`) and makes the supervisor **propagate each stage's casefile artifact to its dependent task via `TaskSpec.input_refs`** (`workflows/supervisor.py:62-71`), which `casefile_from_invocation()` now reads (`agents/casefile_utils.py:18-22`). Build is green (25 unit tests).
+>
+> **Net effect on this report:** the typed casefile handoff is now genuinely wired end-to-end (a real improvement — it resolves the "prompt-only handoff" risk in the *good* direction), so §2's praise of the contracts handoff is reinforced. **The core thesis is unchanged and arguably sharper:** the entire read-only triage path is now executed as deterministic Python with *no model reasoning, no skill injection, and no policy gate* on any of the six stages. Specific line references updated below are marked ⟳. Findings in §2.1–2.4, §3.1, §4, §5, §6, §7 all still hold.
+
 ---
 
 ## 1. Executive summary
@@ -25,7 +29,7 @@ The rest of this document details findings by theme with `file:line` references,
 This is the most important section. Four mechanisms that the README and `implementation-plan.md` describe as core are not connected to runtime behavior.
 
 ### 2.1 Agents do not actually reason with a model
-- `BaseAgent.run()` is the only path that calls the model (`agents/base.py:29-30`), and only the 3 stub agents (`qa_lead`, `data_analyst`, `software_engineer`) use it. The 6 "richer" agents override `run()` with hand-coded Python and **never call `model_gateway`** (e.g. `agents/repo_analyst/main.py:18-74`).
+- `BaseAgent.run()` is the only path that calls the model (`agents/base.py:29-30`), and only the 3 stub agents (`qa_lead`, `data_analyst`, `software_engineer`) use it. The 6 "richer" agents override `run()` with hand-coded Python and **never call `model_gateway`** (e.g. `agents/repo_analyst/main.py:18-74`). ⟳ Since ADR-0007 the default mission now runs **all six** of these deterministic agents as the Temporal pipeline (`activities/planning.py:9-75`), so the production triage path is *entirely* model-free, not just the eval path.
 - The `fake` model returns `f"[fake:{model_id}] {prompt[:500]}"` (`model_gateway/gateway.py:23`) — a prompt echo. Every eval and every `just check` runs on this echo, so **no test exercises real model reasoning**, and the "pass^k" eval semantics (`cli/main.py:48-55`) measure deterministic Python, not model quality.
 - `StrandsAgentRuntime` (`runtime/strands_runtime.py`) constructs `Agent(system_prompt=...)` with **no tools and no skills**, wrapped in a bare `except Exception` that silently falls back (`strands_runtime.py:44-48`). Even when `strands` is installed it cannot call tools.
 
@@ -38,11 +42,11 @@ This is the most important section. Four mechanisms that the README and `impleme
 
 ### 2.3 Tool policy is never enforced
 - `tools/policy.py` (`ToolPolicy`/`ToolContext`) is exercised **only by its own unit test** (`tests/unit/test_harness_contracts.py`). No agent or activity routes a tool call through it.
-- `repo_analyst` calls `provider.get_file(...)` directly (`agents/repo_analyst/main.py:34-36`) with no policy gate, despite README claiming "tool access is policy-gated and denied by default."
+- `repo_analyst` calls `provider.get_file(...)` directly (`agents/repo_analyst/main.py:34-36`) with no policy gate, despite README claiming "tool access is policy-gated and denied by default." ⟳ ADR-0007 added a **second** ungated provider read — `plan_mission` now calls `provider.get_issue("SEC-1")` directly in the planning activity (`activities/planning.py:30-33`), also with no policy gate (and a hardcoded issue id).
 - All 26 `SKILL.md` files declare the **same** `allowed-tools` line regardless of phase, and the front-matter is explicitly "descriptive, not enforcement."
 
 ### 2.4 Approvals are collected but never gate execution
-- `SupervisorWorkflow.approve_task`/`reject_task` updates store approver strings (`workflows/supervisor.py:107-141`) but the scheduling loop (`supervisor.py:60-78`) **never reads `self.approvals`**. `request_replan` terminally `return`s instead of replanning (`supervisor.py:47-50`) — "replan" is a misnomer for "stop."
+- `SupervisorWorkflow.approve_task`/`reject_task` updates store approver strings (⟳ `workflows/supervisor.py:120-149`) but the scheduling loop (⟳ `supervisor.py:62-90`) **never reads `self.approvals`**. `request_replan` terminally `return`s instead of replanning (⟳ `supervisor.py:49-52`) — "replan" is a misnomer for "stop." (Unchanged by ADR-0007, which added artifact propagation but no approval gating.)
 
 > **Recommendation:** Treat 2.1–2.4 as the product's critical path. Pick **one** vertical slice (e.g. `ticket_analyst` → `risk_auditor`) and make it genuinely model-driven with real skill injection and a real policy gate end-to-end, on a *real local model* (Ollama), with golden evals that fail when the model misbehaves. Everything else is secondary to proving this loop works once.
 
@@ -51,11 +55,11 @@ This is the most important section. Four mechanisms that the README and `impleme
 ## 3. Architecture & simplification
 
 ### 3.1 Three parallel, disconnected representations of "the plan/DAG"
-1. `activities/planning.py:9-29` — a static 2-task `PlanVersion`.
-2. `runtime/graph_templates.py:23-52` — a `GraphTemplate` with its own `execution_order` topological sort and a `triage-readonly` registry.
-3. `workflows/supervisor.py:51-55` — its own inline topological scheduler.
+1. ⟳ `activities/planning.py:6-75` — a hand-built linear `PlanVersion` driven by a hardcoded `PIPELINE` constant (was a static 2-task plan; ADR-0007 grew it to a 6-task chain but it is still a static, code-embedded DAG).
+2. `runtime/graph_templates.py:23-52` — a `GraphTemplate` with its own `execution_order` topological sort and a `triage-readonly` registry — which already encodes a triage pipeline.
+3. `workflows/supervisor.py:53-57` — its own inline topological scheduler.
 
-The supervisor never consumes `graph_templates`; `plan_mission` never references them. The DAG algorithm is implemented twice. **Collapse to one** plan representation and one scheduler.
+The supervisor never consumes `graph_templates`; `plan_mission` never references them. The DAG algorithm is implemented twice, and ADR-0007's `PIPELINE` list now hardcodes a *fourth* shape of the same triage ordering that `graph_templates.triage_readonly_graph` already describes. **Collapse to one** plan representation and one scheduler — ideally have the planner emit the graph template the runtime already knows about.
 
 ### 3.2 Worker split is illusory
 `workers/supervisor_worker.py:18-23` registers *both* workflows and *both* activities on one task queue; `workers/agent_worker.py` just re-calls `supervisor_worker.main` (`agent_worker.py:1-6`). There is no separate agent queue, so the implied isolation doesn't exist. Either give the agent worker its own task queue/registrations or delete it.
@@ -95,9 +99,9 @@ The supervisor never consumes `graph_templates`; `plan_mission` never references
 These are latent landmines — the current happy path is safe, but the defaults make future edits dangerous, and there are no workflow tests to catch regressions.
 
 - **Wall-clock in workflow-reachable code.** `RunSnapshot.updated_at` defaults to `datetime.now(UTC)` (`contracts/mission.py:106`) and `RunSnapshot` is constructed *inside* the workflow (`supervisor.py:27`). `model_validate(plan)` in the workflow (`supervisor.py:34`) re-runs default factories for any missing field, so a plan missing `created_at`/IDs would invoke `datetime.now`/`uuid4()` during replay → non-determinism. Use `workflow.now()` and freeze timestamps/IDs in the activity.
-- **Approvals don't gate scheduling** (see §2.4) — `supervisor.py:60-78` never checks `self.approvals`.
-- **"Replan" terminates the run** instead of replanning (`supervisor.py:47-50`).
-- **No concurrency.** Runnable sibling tasks execute strictly sequentially in a `for await` loop (`supervisor.py:60-66`); `GraphTemplate.max_concurrency` exists but is unused. Independent branches should `asyncio.gather`.
+- **Approvals don't gate scheduling** (see §2.4) — ⟳ `supervisor.py:62-90` never checks `self.approvals`.
+- **"Replan" terminates the run** instead of replanning (⟳ `supervisor.py:49-52`).
+- **No concurrency.** Runnable sibling tasks execute strictly sequentially in a `for await` loop (⟳ `supervisor.py:62-90`); `GraphTemplate.max_concurrency` exists but is unused. (ADR-0007's pipeline is purely linear, so this is latent today, but the scheduler is what will serialize any future fan-out.) Independent branches should `asyncio.gather`.
 - **Retry safety net is decorative** — `non_retryable_error_types` lists types nothing raises (§3.4); agents never raise (they always return `COMPLETED` at `base.py:43`), so there is effectively **no failure path** from a real agent error.
 - **Broad `except` masks bugs.** `api/app.py:54-55` turns any `start_workflow` error (bad args, serialization) into "Temporal unavailable" 503. `strands_runtime.py` swallows all exceptions into a silent fallback.
 - **`agent_task.py` ignores `TaskSpec.max_attempts`** (`mission.py:38`), hardcoding the `MODEL` retry profile (`agent_task.py:28`).
@@ -118,7 +122,7 @@ These are latent landmines — the current happy path is safe, but the defaults 
 ## 7. Scalability & resource handling
 
 - **Connection-per-call, no pooling.** Every storage method does `asyncpg.connect()`/close in `finally` (`storage/artifacts.py:16,41`; `storage/checkpoints.py:16,43`). `run_agent.py:16-17` calls `append` in a loop → one connect/disconnect per checkpoint. Adopt `asyncpg.create_pool` and inject the pool.
-- **Unclosed httpx clients, rebuilt per request.** `AzureDevOpsSourceProvider`/`GitHubSourceProvider` create `httpx.AsyncClient` in `__init__` and never `aclose()` (`azure_devops.py:28`, `github.py:26`); the factory builds a fresh provider on every `/health` and CLI call (`api/app.py:28`, `cli/main.py:26`) → connection-pool leak. Make providers async context managers and/or cache them.
+- **Unclosed httpx clients, rebuilt per request.** `AzureDevOpsSourceProvider`/`GitHubSourceProvider` create `httpx.AsyncClient` in `__init__` and never `aclose()` (`azure_devops.py:28`, `github.py:26`); the factory builds a fresh provider on every `/health` and CLI call (`api/app.py:28`, `cli/main.py:26`) → connection-pool leak. ⟳ ADR-0007 added another hot path: `plan_mission` builds a fresh provider on **every mission** (`activities/planning.py:30-31`) and discards it after one `get_issue`. Make providers async context managers and/or cache them.
 - **Naive migration runner.** `storage/migrations.py:12-24` globs `*.sql`, sorts, and `execute()`s each whole file every run, relying on `IF NOT EXISTS` for idempotency. No version table, no per-migration transaction, no down-migrations; `ALTER TABLE ADD COLUMN` will fail on re-run. Uses a relative `Path("migrations")` (CWD-dependent). Adopt Alembic/yoyo or at minimum a `schema_migrations` table + per-file transaction.
 - **No pagination.** Both real providers slice `[:limit]` of a single page (`github.py:120`, `azure_devops.py:127`) → silent truncation at scale. No 429/`Retry-After` handling; raw `httpx.HTTPStatusError` leaks to agent code.
 - **No token capture.** The gateway creates a fresh client per call and never reads usage, so `BudgetUsage.input_tokens/output_tokens` (`budget.py`) can never be populated — token-budget enforcement is dead. The `budget_events` table (`migrations/0002:28-37`) has **no writer**.
@@ -229,5 +233,3 @@ After the `CasefileAgent` refactor (§4), a new agent should be: one `metadata.y
 - Resolve fixtures via `Path(__file__).parent`.
 - Add `-> SourceProvider` return annotation to `factory.py` for a free conformance check.
 - Move provider credential validation into a `Settings` validator so it fails at config load.
-</content>
-</invoke>

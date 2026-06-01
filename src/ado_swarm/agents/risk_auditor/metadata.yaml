@@ -10,10 +10,11 @@ skill_packs:
   - triage-readonly
 skills:
   - security-risk-scoring
+  - change-impact-classification
+  - automation-eligibility-assessment
 tools:
   allowed:
-    - casefile_read
-    - blackboard_append
+    - score_severity
   denied:
     - provider_create_draft_pr
     - git_write

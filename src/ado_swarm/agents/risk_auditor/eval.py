@@ -1,92 +1,71 @@
 from __future__ import annotations
 
-import argparse
-import asyncio
 import json
 from pathlib import Path
-from uuid import uuid4
 
-from ado_swarm.agents.eval_support import build_eval_model_gateway
-from ado_swarm.agents.risk_auditor.main import build_agent
+from ado_swarm.agents.eval_support import eval_cli, eval_invocation, run_agent_eval
 from ado_swarm.agents.ticket_analyst.normalization import build_casefile
-from ado_swarm.contracts.casefile import (
-    FindingAdjudication,
-    RepositoryEvidence,
-)
-from ado_swarm.contracts.mission import AgentInvocation, TaskSpec
+from ado_swarm.contracts.casefile import RiskClassification
+from ado_swarm.contracts.events import RiskLevel, TaskState
+from ado_swarm.contracts.mission import AgentResult
 from ado_swarm.contracts.source_provider import SourceIssue
+from ado_swarm.model_gateway.strands_models import FakeModel, ScriptStep, ToolCall
 
-
-def _fixture_casefile() -> dict:
-    issue = SourceIssue.model_validate(
-        json.loads(Path("tests/fixtures/source_issues/codeql_sast.json").read_text())
-    )
-    casefile = build_casefile("eval-run", issue)
-    casefile.repository_evidence = RepositoryEvidence.model_validate(
-        {
-            "repository": casefile.source_issue.repository.model_dump(mode="json")
-            if casefile.source_issue.repository
-            else None,
-            "ref": "main",
-            "file_exists": True,
-            "evidence": ["fixture repository evidence"],
-        }
-    )
-    casefile.adjudication = FindingAdjudication.model_validate(
-        {
-            "stale": False,
-            "duplicate_of": None,
-            "false_positive": False,
-            "already_fixed": False,
-            "rationale": "fixture adjudication",
-            "confidence": 0.85,
-        }
-    )
-    casefile.risk = None
-    casefile.remediation_plan = None
-    return casefile.model_dump(mode="json")
+FIXTURE = Path(__file__).resolve().parents[4] / "tests/fixtures/source_issues/codeql_sast.json"
 
 
 async def run_eval(model_profile: str = "fake") -> dict:
-    agent = build_agent(build_eval_model_gateway(model_profile))
-    task = TaskSpec(
-        run_id="eval-run",
-        title="Evaluate Risk Auditor",
-        objective="Run deterministic casefile evaluation for Risk Auditor.",
-        capability="risk_auditor",
-        agent_id="risk_auditor",
-        constraints={"casefile": _fixture_casefile()},
+    issue = SourceIssue.model_validate(json.loads(FIXTURE.read_text()))
+    casefile = build_casefile("eval-run", issue)
+    finding = casefile.normalized_finding
+    if finding is None:
+        raise ValueError("fixture casefile is missing a normalized finding")
+    finding_dict = finding.model_dump(mode="json")
+    expected = RiskClassification(
+        risk_level=RiskLevel.HIGH,
+        impact="sast finding with high severity",
+        automation_eligible=False,
+        confidence=0.8,
+        rationale="High-severity SAST finding requires human review.",
     )
-    result = await agent.run(
-        AgentInvocation(
-            run_id="eval-run",
-            task=task,
-            context_id="eval",
-            plan_version=1,
-            idempotency_key=str(uuid4()),
+    fake = FakeModel(
+        script=[
+            ScriptStep(
+                tool_calls=[ToolCall(name="score_severity", input={"finding": finding_dict})]
+            ),
+            ScriptStep(text="scored the finding"),
+        ],
+        structured_outputs={RiskClassification: expected},
+    )
+    invocation = eval_invocation(
+        "risk_auditor",
+        objective="Score risk and automation eligibility.",
+        constraints={"casefile": casefile.model_dump(mode="json")},
+    )
+
+    def assertion(result: AgentResult) -> bool:
+        if result.state != TaskState.COMPLETED or not result.artifact_refs:
+            return False
+        casefile_out = result.artifact_refs[0].metadata["casefile"]
+        risk = casefile_out.get("risk")
+        audit = casefile_out.get("audit", {}).get("risk_auditor", {})
+        return (
+            bool(risk)
+            and risk.get("risk_level") in {"low", "medium", "high", "critical"}
+            and "score_severity" in audit.get("tools_allowed", [])
         )
+
+    return await run_agent_eval(
+        "risk_auditor",
+        invocation=invocation,
+        model_profile=model_profile,
+        fake_model=fake,
+        assertion=assertion,
     )
-    casefile = result.artifact_refs[0].metadata["casefile"] if result.artifact_refs else {}
-    passed = result.state == "completed" and casefile.get("risk") is not None
-    return {
-        "agent_id": "risk_auditor",
-        "passed": passed,
-        "result": result.model_dump(mode="json"),
-    }
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--model-profile", default="fake")
-    parser.add_argument("--output")
-    args = parser.parse_args()
-    payload = asyncio.run(run_eval(args.model_profile))
-    if args.output:
-        path = Path(args.output)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(payload, indent=2))
-    else:
-        print(json.dumps(payload, indent=2))
+    eval_cli(run_eval)
 
 
 if __name__ == "__main__":

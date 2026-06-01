@@ -1,7 +1,7 @@
 ---
 name: iac-remediation-execution
-description: Apply narrowly scoped infrastructure-as-code fixes with policy checks and validation.
-allowed-tools: provider_get_issue provider_get_repo_metadata casefile_read blackboard_append graphiti_search policy_check_action
+description: Use this skill when remediating an infrastructure-as-code misconfiguration (category=iac, e.g. Terraform/CloudFormation/K8s) inside an approved, sandboxed change boundary.
+allowed-tools: resolve_repository verify_file_location propose_remediation_strategy apply_remediation_change graphiti_search
 metadata:
   pack: remediation
   maturity: base
@@ -10,20 +10,54 @@ metadata:
 
 ## Objective
 
-Apply narrowly scoped infrastructure-as-code fixes with policy checks and validation.
+Correct a `normalized_finding.category == "iac"` misconfiguration (public bucket, open
+security group, missing encryption, over-broad IAM, disabled logging) by editing the
+declarative resource block to a secure-by-default setting — a config edit, never app code.
 
-## Required inputs
+## When to use
 
-A canonical casefile or task context, provider metadata, available repository evidence, prior audit events, and applicable policy constraints.
+The finding is an IaC/Terraform/CloudFormation/Kubernetes/Helm misconfiguration whose
+`file_path` points at the declaration, with a `remediation_plan` for the config change.
+
+## Inputs
+
+- `normalized_finding`: `cwe`, `file_path` (`.tf`, `.yaml`, `.json`, Helm template), `title`.
+- `remediation_plan`: `strategy`, `change_boundary`, `steps`.
+- Sandbox working copy root + `repository_evidence.repository`.
 
 ## Procedure
 
-1. Confirm that the task objective matches this skill and identify missing evidence.
-2. Work only from canonical contracts and explicitly referenced evidence.
-3. Request only tools allowed by the active runtime policy; `allowed-tools` is descriptive, not enforcement.
-4. Produce structured, audit-friendly output with confidence, rationale, evidence references, and stop conditions.
-5. Escalate rather than guess when evidence is missing, ambiguous, sensitive, or outside the safe change boundary.
+1. Confirm approval (`requires_human_approval`) before any write; abort if unapproved.
+2. `verify_file_location` on the IaC file; ensure it is in `change_boundary`.
+3. Identify the exact attribute to harden (e.g. `acl = "private"`, enable `encryption`,
+   restrict CIDR off `0.0.0.0/0`, `enable_logging = true`, scope IAM action/resource).
+4. `graphiti_search` for the org's accepted secure baseline for this resource type.
+5. Apply via `apply_remediation_change` with a precise `find`/`replace` on the single attribute;
+   keep variable interpolation and module wiring intact.
+6. Record the diff in `execution`.
+
+## Decision criteria
+
+- Choose the least-privilege / encrypted / private default that still meets the resource's purpose.
+- Do not widen access to "make it work"; if hardening breaks a required path, escalate.
+- Prefer module/variable defaults over hardcoding when a shared module is in use.
+
+## Checklist
+
+- [ ] Only the misconfigured attribute(s) changed; plan/state files untouched.
+- [ ] No secrets introduced into the manifest.
+- [ ] HCL/YAML remains well-formed.
 
 ## Output expectations
 
-Return concise findings suitable for inclusion in `AgentResult`, casefile sections, and task audit events. Include activated skill name `iac-remediation-execution` in audit metadata.
+`ExecutionResult` with `applied=true`, `changed_files` limited to the IaC file(s).
+
+## Safety
+
+WRITE tool `apply_remediation_change` is approval-gated and sandbox-bounded; out-of-boundary
+paths are refused. Never edit live infra, state, or credentials — config files only.
+
+## Escalation
+
+Change risks an outage, needs a coordinated infra rollout, or touches IAM trust policy → leave
+unapplied and escalate to `needs_human`.

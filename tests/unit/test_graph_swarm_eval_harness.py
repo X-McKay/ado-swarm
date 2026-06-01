@@ -9,7 +9,18 @@ from ado_swarm.temporal.search_attributes import MissionSearchAttributes
 def test_triage_graph_template_order_is_dependency_safe() -> None:
     graph = triage_readonly_graph()
     order = [node.node_id for node in graph.execution_order()]
-    assert order == ["ticket", "repo", "security", "risk"]
+    assert order == [
+        "ticket_analyst",
+        "repo_analyst",
+        "security_reviewer",
+        "risk_auditor",
+        "solutions_architect",
+        "test_engineer",
+        "submission_engineer",
+    ]
+    # The submission stage is approval-gated.
+    submission = next(n for n in graph.nodes if n.node_id == "submission_engineer")
+    assert submission.requires_approval is True
 
 
 def test_bounded_swarm_experiment_rejects_unknown_agents() -> None:

@@ -1,0 +1,24 @@
+id: submission_engineer
+name: Submission Engineer
+version: 0.1.0
+description: Prepares the draft PR and ticket disposition for an approved, validated remediation.
+entrypoint: ado_swarm.agents.submission_engineer.main:build_agent
+eval_entrypoint: ado_swarm.agents.submission_engineer.eval:run_eval
+capabilities:
+  - submission-engineer
+skill_packs:
+  - validation-submission
+skills:
+  - pull-request-preparation
+  - ticket-disposition-update
+tools:
+  allowed:
+    - provider_create_draft_pr
+    - provider_add_issue_comment
+    - assess_readiness
+  denied:
+    - git_write
+risk_tier: medium
+outputs:
+  - security_casefile
+  - audit_metadata

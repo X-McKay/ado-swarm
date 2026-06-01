@@ -22,7 +22,9 @@ from ado_swarm.contracts.mission import (
     TaskSpec,
 )
 from ado_swarm.contracts.source_provider import (
+    MutationResultKind,
     ProviderMutationResult,
+    SourceCommit,
     SourceFile,
     SourceIssue,
     SourceProviderKind,
@@ -36,6 +38,7 @@ __all__ = [
     "ArtifactRef",
     "FindingAdjudication",
     "MemoryRef",
+    "MutationResultKind",
     "NormalizedFinding",
     "PlanVersion",
     "ProviderMutationResult",
@@ -46,6 +49,7 @@ __all__ = [
     "RunSnapshot",
     "RunStatus",
     "SecurityCasefile",
+    "SourceCommit",
     "SourceFile",
     "SourceIssue",
     "SourceProviderKind",

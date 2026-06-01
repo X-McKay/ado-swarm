@@ -32,6 +32,45 @@ eval-agents:
 
 check: lint typecheck test eval-agents
 
+# --- Added for the cleanup (Phase 0 infra) ---
+
+format-check:
+  uv run ruff format --check src tests
+
+test-cov:
+  uv run pytest tests/unit --cov=ado_swarm --cov-report=term-missing
+
+test-workflow:
+  uv run pytest tests/workflow
+
+skills-validate:
+  uv run python -c "from ado_swarm.skills.loader import validate_packs; import sys; bad=validate_packs(); print('OK' if not bad else bad); sys.exit(1 if bad else 0)"
+
+up-ollama:
+  docker compose -f docker-compose.yml -f docker-compose.ollama.yml up -d --build
+
+# --- Isolated agent/skill dev harness & scaffolders ---
+agent-run agent *ARGS:
+  uv run ado-swarm agents run {{agent}} {{ARGS}}
+
+skills-list:
+  uv run ado-swarm skills list
+
+skills-show name:
+  uv run ado-swarm skills show {{name}}
+
+skills-lint:
+  uv run ado-swarm skills lint
+
+new-agent id section="TODO_section" tool="TODO_tool":
+  uv run ado-swarm scaffold agent {{id}} --section-field {{section}} --tool {{tool}}
+
+new-tool name area:
+  uv run ado-swarm scaffold tool {{name}} {{area}}
+
+new-skill name description="TODO: when to use this skill":
+  uv run ado-swarm scaffold skill {{name}} --description "{{description}}"
+
 up:
   docker compose up -d --build
 

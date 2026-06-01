@@ -1,7 +1,7 @@
 ---
 name: security-risk-scoring
-description: Score exploitability, severity, exposure, asset sensitivity, and compensating controls.
-allowed-tools: provider_get_issue provider_get_repo_metadata casefile_read blackboard_append graphiti_search policy_check_action
+description: Use this skill when scoring the real-world risk of a confirmed finding into a low/medium/high/critical RiskLevel.
+allowed-tools: score_severity adjudication_signals graphiti_search
 metadata:
   pack: risk-impact
   maturity: base
@@ -10,20 +10,56 @@ metadata:
 
 ## Objective
 
-Score exploitability, severity, exposure, asset sensitivity, and compensating controls.
+Translate a confirmed (not stale/duplicate/false-positive) `normalized_finding` into a
+calibrated `risk.risk_level` of `low | medium | high | critical`, with a concrete `impact`
+statement. This drives prioritization and downstream automation gating.
 
-## Required inputs
+## When to use
 
-A canonical casefile or task context, provider metadata, available repository evidence, prior audit events, and applicable policy constraints.
+The risk_auditor must populate `risk`, after `adjudication` has left the finding open/real.
+
+## Inputs
+
+- `normalized_finding`: `severity`, `cwe`, `category`, `package_name`, `file_path`,
+  `confidence`.
+- `adjudication` (confirm the finding is real before scoring).
+- `repository_evidence` (reachability / where the code lives).
 
 ## Procedure
 
-1. Confirm that the task objective matches this skill and identify missing evidence.
-2. Work only from canonical contracts and explicitly referenced evidence.
-3. Request only tools allowed by the active runtime policy; `allowed-tools` is descriptive, not enforcement.
-4. Produce structured, audit-friendly output with confidence, rationale, evidence references, and stop conditions.
-5. Escalate rather than guess when evidence is missing, ambiguous, sensitive, or outside the safe change boundary.
+1. Call `score_severity` with the finding to get a base technical severity normalized
+   across scanners.
+2. Adjust for the **CWE class**: RCE / injection / deserialization / auth bypass weigh up;
+   info-leak / DoS-only weigh down.
+3. Adjust for **exploitability & reachability**: reachable from untrusted input?
+   internet-facing? behind auth / internal-only? Use `adjudication_signals` /
+   `repository_evidence` for context.
+4. Adjust for **blast radius**: live secret, data-store access, shared library, or widely
+   imported module -> wider radius -> higher level.
+5. Optionally `graphiti_search` for how similar findings were rated historically.
+
+## Decision criteria
+
+Combine base severity x CWE class x exploitability x blast radius:
+- **critical**: RCE / injection / leaked live secret / auth bypass reachable from untrusted
+  input on an internet-facing or shared path.
+- **high**: serious weakness, reachable, but mitigated by auth, internal-only exposure, or
+  limited radius; or a critical-class CWE with uncertain reachability.
+- **medium**: real weakness with limited exploitability or contained blast radius (e.g.
+  outdated dependency with no known reachable exploit).
+- **low**: defense-in-depth / hardening / hygiene with negligible direct impact.
+- Downgrade one level when scanner `confidence` is low AND reachability is unproven.
 
 ## Output expectations
 
-Return concise findings suitable for inclusion in `AgentResult`, casefile sections, and task audit events. Include activated skill name `security-risk-scoring` in audit metadata.
+Populate `risk` (`RiskClassification`): `risk_level`, a one-to-two sentence `impact` (what
+an attacker gains and where), `rationale` naming the factors, and `confidence`. Treat
+`automation_eligible` here as a preliminary hint; the automation-eligibility skill makes the
+binding call.
+
+## Escalation
+
+- Critical or high with material uncertainty -> set `confidence <= 0.5`; downstream should
+  treat as `needs_human` rather than auto-proceed.
+- Never silently downgrade a critical-class CWE to medium without explicit reachability
+  evidence recorded in `rationale`.

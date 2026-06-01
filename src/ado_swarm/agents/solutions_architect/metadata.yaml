@@ -10,10 +10,11 @@ skill_packs:
   - triage-readonly
 skills:
   - fix-plan-generation
+  - remediation-strategy-selection
+  - safe-change-boundary-definition
 tools:
   allowed:
-    - casefile_read
-    - blackboard_append
+    - propose_remediation_strategy
   denied:
     - provider_create_draft_pr
     - git_write
