@@ -15,10 +15,10 @@ from ado_swarm.agents.swarm_cell import (
 from ado_swarm.agents.ticket_analyst.normalization import build_casefile
 from ado_swarm.contracts.casefile import FindingAdjudication
 from ado_swarm.contracts.events import TaskState
+from ado_swarm.contracts.source_provider import SourceIssue
 from ado_swarm.model_gateway.gateway import ModelGateway, ModelProfile
 from ado_swarm.model_gateway.strands_models import FakeModel
 from ado_swarm.tools.policy import ToolContext
-from ado_swarm.contracts.source_provider import SourceIssue
 
 FIXTURE = Path(__file__).resolve().parents[1] / "fixtures" / "source_issues" / "codeql_sast.json"
 

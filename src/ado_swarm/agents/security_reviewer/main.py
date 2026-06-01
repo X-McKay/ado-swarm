@@ -96,7 +96,8 @@ class SecurityReviewerAgent(CasefileAgent):
                 name=name,
                 system_prompt=(f"You are the {name} on a security adjudication panel. {stance}"),
                 reasoning_prompt=(
-                    f"{stance}\n\nProduce your position as a FindingAdjudication.\n\n{finding_block}"
+                    f"{stance}\n\nProduce your position as a FindingAdjudication.\n\n"
+                    f"{finding_block}"
                 ),
                 tool_names=["adjudication_signals", "graphiti_search"],
                 skill_names=[skill],
