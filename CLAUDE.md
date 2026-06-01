@@ -42,16 +42,20 @@ MODEL_PROVIDER=ollama just eval-agents                # evals against a real loc
 src/ado_swarm/
   agents/<id>/        main.py (CasefileAgent subclass + build_agent), metadata.yaml, eval.py, fixtures/
   agents/casefile_agent.py   CasefileAgent base (read casefile -> reason -> emit one typed section)
-  agents/model_runtime.py    run_model_agent: builds the Strands agent (tools+skills+policy) and runs it
+  agents/model_runtime.py    run_model_agent: builds the Strands agent (tools+skills+policy+tracing) and runs it
+  agents/swarm_cell.py       bounded adjudication swarm cell (ensemble + judge; ADR-0009)
   agents/registry.py         build_agent(); single-sources skills from metadata
   agents/eval_support.py     run_agent_eval / eval_cli (shared eval harness)
   tools/catalog/      typed @tool functions (the deterministic capabilities) + registry
   tools/policy.py / policy_hook.py   ToolPolicy + the BeforeToolCallEvent gate
   skills/<name>/SKILL.md      the skill catalog; skills/runtime.py binds it via AgentSkills
   model_gateway/strands_models.py    build_strands_model + FakeModel (deterministic, offline)
-  contracts/          pydantic contracts (casefile.py, mission.py, events.py, ...)
-  workflows/ activities/ workers/    Temporal (deterministic workflows; I/O in activities)
-  tools/source_providers/   ADO/GitHub/stub adapters behind a Protocol
+  runtime/telemetry.py       config-gated OTel (Strands + Temporal interceptors; ADR-0010)
+  runtime/graph_templates.py the pipeline DAG (single source of truth for the planner)
+  contracts/          pydantic contracts (casefile.py, mission.py, events.py, source_provider.py)
+  workflows/ activities/ workers/    Temporal (deterministic workflows; approval gate; I/O in activities)
+  tools/source_providers/   ADO/GitHub/stub adapters behind a Protocol (read + approval-gated write)
+  evals/swarm_comparison.py  single-agent vs swarm adjudication comparison (ado-swarm eval-swarm)
   storage/ knowledge/ sandbox/ api/ cli/
 tests/unit/  tests/workflow/
 ```

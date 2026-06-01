@@ -43,4 +43,11 @@ New workflow-visible state should be contracts first, tested in isolation. Use `
 To add an agent/tool/skill, follow the step-by-step in `CLAUDE.md`.
 
 
-The default Temporal mission planner executes the full casefile pipeline in this order: `ticket_analyst`, `repo_analyst`, `security_reviewer`, `risk_auditor`, `solutions_architect`, and `test_engineer`. When modifying planner or workflow behavior, preserve dependency artifact propagation: downstream tasks should receive upstream casefile artifacts through `TaskSpec.input_refs`, and workflows should avoid storing mutable casefile state outside typed artifacts.
+The default Temporal mission planner builds the pipeline from one graph template (`runtime/graph_templates.py::triage_readonly_graph`, the single source of truth — do not reintroduce a parallel `PIPELINE` list): `ticket_analyst → repo_analyst → security_reviewer → risk_auditor → solutions_architect → test_engineer → submission_engineer`. When modifying planner or workflow behavior, preserve dependency artifact propagation: downstream tasks receive upstream casefile artifacts through `TaskSpec.input_refs`, and workflows must not store mutable casefile state outside typed artifacts.
+
+## Newer subsystems (keep these conventions)
+
+- **Approval gate:** a node with `requires_approval=True` (e.g. `submission_engineer`) makes the supervisor park `WAITING_FOR_APPROVAL`; on `approve_task` the task is dispatched with `constraints["approved"]=True` so its `write_tool_names` pass the policy gate. Keep write tools approval-gated; never enable them unconditionally.
+- **Bounded swarm cell** (`agents/swarm_cell.py`, ADR-0009): multi-perspective ensemble + judge inside one activity, hard `max_model_calls` budget, opt-in (`use_swarm` / `security_reviewer_use_swarm`) and eval-gated via `ado-swarm eval-swarm`. Don't default it on without an eval win.
+- **OTel tracing** (`runtime/telemetry.py`, ADR-0010): config-gated (`tracing_enabled`); use `setup_telemetry()` + `trace_attributes()` + `temporal_interceptors()`. Never hand-roll spans (the old `runtime/observability.py` was removed).
+- **Knowledge store** (`knowledge/providers.py`): resolve via `get_knowledge_store()`; backend is `memory` or `graphiti` per `knowledge_backend`. **Verification governor:** `run_validation_command` runs allowlisted commands in the sandbox — a non-zero exit is a hard failure, not advisory.

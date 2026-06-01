@@ -1,7 +1,9 @@
 # Agent Tools & Skills Review
 
 **Date:** 2026-05-31
-**Context:** All 9 agents are now model-driven (tools in a loop). This review maps what each agent can *actually do* (tools) vs. what its skills *tell it to do*, surfaces gaps, and recommends tools/skills worth adding or exploring.
+**Context:** All agents are model-driven (tools in a loop). This review maps what each agent can *actually do* (tools) vs. what its skills *tell it to do*, surfaces gaps, and recommends tools/skills worth adding or exploring.
+
+> **Note:** Sections 1–2 below are the *original* point-in-time snapshot (10 catalog tools, 2 orphan skills). The current state — **22 tools across 10 agents, no orphan skills** — is captured in "Implemented since this review" just below; treat that section as the source of truth.
 
 ## Implemented since this review
 
