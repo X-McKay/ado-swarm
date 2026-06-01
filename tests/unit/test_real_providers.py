@@ -15,7 +15,7 @@ from ado_swarm.contracts.source_provider import (
 )
 from ado_swarm.tools.source_providers.azure_devops import AzureDevOpsSourceProvider
 from ado_swarm.tools.source_providers.base import ProviderError
-from ado_swarm.tools.source_providers.github import GitHubSourceProvider
+from ado_swarm.tools.source_providers.github import GitHubSourceProvider, parse_github_issue_id
 
 ADO_ORG = "https://dev.azure.com/contoso"
 ADO_PROJECT = "secproj"
@@ -220,6 +220,39 @@ async def test_github_get_issue_parses_contract() -> None:
     assert issue.external_id == "repo#5"
     assert issue.repository is not None
     assert issue.repository.name == "repo"
+
+
+def test_parse_github_issue_id_accepts_repo_and_owner_qualified_forms() -> None:
+    assert parse_github_issue_id("octo", "repo#5") == ("octo", "repo", "5")
+    assert parse_github_issue_id("fallback", "octo/repo#5") == ("octo", "repo", "5")
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_github_get_issue_accepts_owner_qualified_external_id() -> None:
+    respx.get(f"{GH_BASE}/repos/octo/repo").mock(return_value=httpx.Response(200, json=_gh_repo()))
+    respx.get(f"{GH_BASE}/repos/octo/repo/issues/5").mock(
+        return_value=httpx.Response(200, json=_gh_issue(5))
+    )
+    async with GitHubSourceProvider("token", "fallback") as provider:
+        issue = await provider.get_issue("octo/repo#5")
+    assert issue.repository is not None
+    assert issue.repository.owner_or_project == "octo"
+    assert issue.repository.name == "repo"
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_github_add_issue_comment_accepts_owner_qualified_external_id() -> None:
+    respx.post(f"{GH_BASE}/repos/octo/repo/issues/5/comments").mock(
+        return_value=httpx.Response(
+            201,
+            json={"id": 99, "html_url": "https://github.com/octo/repo/issues/5#issuecomment-99"},
+        )
+    )
+    async with GitHubSourceProvider("token", "fallback") as provider:
+        result = await provider.add_issue_comment("octo/repo#5", "comment")
+    assert result.external_id == "99"
 
 
 @pytest.mark.asyncio

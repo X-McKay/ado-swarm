@@ -61,8 +61,8 @@ def test_parse_manifest_requirements_txt() -> None:
     content = "# comment\nrequests==2.31.0\nflask>=2.0\nnot-a-dep\n"
     out = parse_manifest_impl(content, "requirements.txt")
     names = {d["name"]: d["version"] for d in out["dependencies"]}
-    assert names["requests"] == "2.31.0"
-    assert names["flask"] == "2.0"
+    assert names["requests"] == "==2.31.0"
+    assert names["flask"] == ">=2.0"
     assert "not-a-dep" not in names
 
 

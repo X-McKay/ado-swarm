@@ -21,6 +21,20 @@ from ado_swarm.contracts.source_provider import (
 from ado_swarm.tools.source_providers.base import HttpProviderMixin
 
 
+def parse_github_issue_id(default_owner: str, external_id: str) -> tuple[str, str, str]:
+    """Parse issue ids accepted by GitHub provider methods.
+
+    Supported forms are ``repo#number`` and ``owner/repo#number``. The return
+    value is always ``(owner, repo, number)`` so issue reads and comments share
+    one round-trip rule.
+    """
+    repo_part, number = external_id.split("#", 1)
+    if "/" in repo_part:
+        owner, repo = repo_part.split("/", 1)
+        return owner, repo, number
+    return default_owner, repo_part, number
+
+
 class GitHubSourceProvider(HttpProviderMixin):
     provider_name = SourceProviderKind.GITHUB.value
 
@@ -72,9 +86,9 @@ class GitHubSourceProvider(HttpProviderMixin):
         return 'rel="next"' in response.headers.get("Link", "")
 
     async def get_issue(self, external_id: str) -> SourceIssue:
-        repo, number = external_id.split("#", 1)
-        repo_ref = await self.get_repository(self.owner, repo)
-        data = await self._request("GET", f"/repos/{self.owner}/{repo}/issues/{number}")
+        owner, repo, number = parse_github_issue_id(self.owner, external_id)
+        repo_ref = await self.get_repository(owner, repo)
+        data = await self._request("GET", f"/repos/{owner}/{repo}/issues/{number}")
         return self._issue(data, repo_ref)
 
     async def search_issues(self, query: str, *, limit: int = 50) -> SourceIssuePage:
@@ -102,9 +116,9 @@ class GitHubSourceProvider(HttpProviderMixin):
         )
 
     async def add_issue_comment(self, external_id: str, body: str) -> ProviderMutationResult:
-        repo, number = external_id.split("#", 1)
+        owner, repo, number = parse_github_issue_id(self.owner, external_id)
         data = await self._request(
-            "POST", f"/repos/{self.owner}/{repo}/issues/{number}/comments", json={"body": body}
+            "POST", f"/repos/{owner}/{repo}/issues/{number}/comments", json={"body": body}
         )
         return ProviderMutationResult(
             provider=SourceProviderKind.GITHUB,
