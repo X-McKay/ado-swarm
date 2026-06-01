@@ -12,6 +12,9 @@ class GraphNodeSpec:
     objective: str = ""
     depends_on: tuple[str, ...] = ()
     timeout_seconds: int = 300
+    # Write/submission stages whose tools are approval-gated. The planner marks
+    # these tasks so the supervisor parks them for human approval before running.
+    requires_approval: bool = False
 
 
 @dataclass(frozen=True)
@@ -99,8 +102,21 @@ def triage_readonly_graph() -> GraphTemplate:
                 ),
                 depends_on=("solutions_architect",),
             ),
+            GraphNodeSpec(
+                "submission_engineer",
+                "submission_engineer",
+                title="Prepare draft PR and disposition",
+                objective=(
+                    "After approval, prepare a draft pull request and update the ticket "
+                    "disposition for the validated remediation."
+                ),
+                depends_on=("test_engineer",),
+                # Write tools (draft PR, comments) are approval-gated; this stage parks
+                # for human approval before running.
+                requires_approval=True,
+            ),
         ),
-        max_steps=12,
+        max_steps=14,
         max_concurrency=1,
     )
 

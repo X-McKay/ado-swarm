@@ -23,8 +23,11 @@ async def test_plan_mission_builds_full_casefile_pipeline() -> None:
 
     plan = await plan_mission("r-pipeline", "validate pipeline")
     assert [task.agent_id for task in plan.tasks] == [agent_id for agent_id, _, _ in PIPELINE]
-    assert len(plan.tasks) == 6
+    assert len(plan.tasks) == 7
+    assert plan.tasks[-1].agent_id == "submission_engineer"
     assert "source_issue" in plan.tasks[0].constraints
+    # The terminal submission stage is approval-gated.
+    assert plan.tasks[-1].constraints.get("requires_approval") is True
     for index, current in enumerate(plan.tasks[1:], start=1):
         assert current.depends_on == [plan.tasks[index - 1].task_id]
     validate_plan(plan)

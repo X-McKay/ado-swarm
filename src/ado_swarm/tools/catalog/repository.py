@@ -174,3 +174,39 @@ async def repo_parse_manifest(repository: dict, path: str, ref: str = "main") ->
         A JSON object: path, dependency_count, dependencies [{name, version}].
     """
     return await repo_parse_manifest_impl(repository, path, ref)
+
+
+async def git_log_path_impl(
+    repository: dict, path: str, ref: str = "main", limit: int = 20
+) -> dict:
+    repo = SourceRepositoryRef.model_validate(repository)
+    provider = build_source_provider(get_settings())
+    try:
+        commits = await provider.list_commits(repo, path, ref=ref, limit=limit)
+    except Exception as exc:
+        return {"path": path, "commit_count": 0, "commits": [], "error": str(exc)}
+    return {
+        "path": path,
+        "ref": ref,
+        "commit_count": len(commits),
+        "commits": [c.model_dump(mode="json") for c in commits],
+    }
+
+
+@tool
+async def git_log_path(repository: dict, path: str, ref: str = "main", limit: int = 20) -> dict:
+    """List the commit history that touched a path (read-only).
+
+    Use this to judge whether a finding is stale (the location was removed or fixed)
+    or recently changed: inspect the most recent commits' messages, authors, and dates.
+
+    Args:
+        repository: A SourceRepositoryRef JSON object.
+        path: The file path whose history to fetch.
+        ref: The git ref/branch (defaults to "main").
+        limit: Maximum number of commits to return.
+
+    Returns:
+        A JSON object: path, ref, commit_count, commits [{sha, message, author, committed_at, url}].
+    """
+    return await git_log_path_impl(repository, path, ref, limit)

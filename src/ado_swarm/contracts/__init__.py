@@ -23,6 +23,7 @@ from ado_swarm.contracts.mission import (
 )
 from ado_swarm.contracts.source_provider import (
     ProviderMutationResult,
+    SourceCommit,
     SourceFile,
     SourceIssue,
     SourceProviderKind,
@@ -46,6 +47,7 @@ __all__ = [
     "RunSnapshot",
     "RunStatus",
     "SecurityCasefile",
+    "SourceCommit",
     "SourceFile",
     "SourceIssue",
     "SourceProviderKind",

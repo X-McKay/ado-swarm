@@ -8,6 +8,7 @@ import httpx
 from ado_swarm.contracts.source_provider import (
     ProviderMutationResult,
     SourceBranch,
+    SourceCommit,
     SourceFile,
     SourceIssue,
     SourceIssuePage,
@@ -53,6 +54,10 @@ class SourceProvider(Protocol):
     async def get_file(
         self, repository: SourceRepositoryRef, path: str, ref: str
     ) -> SourceFile: ...
+
+    async def list_commits(
+        self, repository: SourceRepositoryRef, path: str, *, ref: str = "main", limit: int = 20
+    ) -> list[SourceCommit]: ...
 
     async def create_draft_pr(
         self,

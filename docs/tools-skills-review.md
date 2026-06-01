@@ -18,7 +18,10 @@ The wiring table below reflects the original snapshot; subsequently delivered on
 - **Real Graphiti/Neo4j `KnowledgeStore`** (`GraphitiKnowledgeStore`, `knowledge_backend=graphiti`) behind the `KnowledgeStorePort`; in-memory remains the default.
 - **`submission_engineer` agent** consumes the approval-gated write tools to prepare a draft PR + disposition (`SubmissionResult`), activating the `pull-request-preparation` / `ticket-disposition-update` skills.
 
-Catalog is now 21 tools across 10 agents. Still open: a true git-history tool once the provider port exposes commit history; OTel tracing; wiring `submission_engineer` into the default Temporal pipeline behind an approval gate.
+- **`git_log_path` tool** + `SourceCommit` contract + `list_commits` on the provider port (stub/ADO/GitHub) — `repo_analyst` can inspect a path's commit history for staleness / recent-fix evidence.
+- **`submission_engineer` wired into the default pipeline** as the terminal, approval-gated stage (planner marks the node `requires_approval`; supervisor parks for `approve_task`, then dispatches with an approved `ToolContext`).
+
+Catalog is now 22 tools across 10 agents. Still open: OTel tracing; provider-contract semantics pinning (`external_id`, mutation-result ids); an eval comparison to default the adjudication swarm on.
 
 ## 1. Current wiring
 

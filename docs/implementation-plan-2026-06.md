@@ -19,10 +19,11 @@
 - **Repository-investigation tools — done.** `repo_grep` (confirm a flagged pattern is present) and `repo_parse_manifest` (confirm the vulnerable package/version) wired into `repo_analyst`.
 - **Provider write tools — done.** `provider_create_draft_pr` (draft only), `provider_add_issue_comment`, `provider_add_pr_comment` (`tools/catalog/provider_write.py`) — WRITE tools that require an approved `ToolContext` via the policy gate; declare them in an agent's `write_tool_names`. The draft-PR path is now available behind approval (no agent enables them by default yet).
 - **Real KnowledgeStore backend — done.** `GraphitiKnowledgeStore` (Neo4j-backed via `graphiti-core`, lazy-imported, graceful degrade) selectable by `knowledge_backend=memory|graphiti`; `KnowledgeStorePort` Protocol; in-memory stays the default.
-- **Submission agent — done.** `submission_engineer` consumes the approval-gated write tools (`provider_create_draft_pr`, `provider_add_issue_comment` in `write_tool_names`) to prepare a DRAFT PR + ticket disposition (`SubmissionResult` section), activating the `pull-request-preparation` / `ticket-disposition-update` skills.
-- **Not started.** OTel GenAI tracing; provider-contract semantics pinning (`external_id`, mutation-result ids); a true git-history tool; promoting the swarm default after an eval comparison; wiring `submission_engineer` into the default Temporal pipeline behind an approval gate.
+- **Submission agent — done.** `submission_engineer` consumes the approval-gated write tools (`provider_create_draft_pr`, `provider_add_issue_comment` in `write_tool_names`) to prepare a DRAFT PR + ticket disposition (`SubmissionResult` section), activating the `pull-request-preparation` / `ticket-disposition-update` skills. **Now the terminal node of the default Temporal pipeline**, behind a per-task approval gate: the planner marks the node `requires_approval`, and the supervisor parks the run (WAITING_FOR_APPROVAL) until `approve_task` is received, then dispatches it with an approved `ToolContext` so its write tools pass the gate (rejection cancels the run).
+- **Git-history tool — done.** `SourceCommit` contract + `list_commits` on the provider port (stub/ADO/GitHub implementations) + `git_log_path` tool wired into `repo_analyst` for staleness/recent-fix evidence.
+- **Not started.** OTel GenAI tracing; provider-contract semantics pinning (`external_id`, mutation-result ids); promoting the swarm default after an eval comparison.
 
-Gate status: `ruff` + `ruff format` + `ty` clean; 153 unit/workflow tests pass (4 skipped); `eval-agents` 10/10 on `fake`; tool catalog = 21 tools; 10 agents.
+Gate status: `ruff` + `ruff format` + `ty` clean; 157 unit/workflow tests pass (4 skipped); `eval-agents` 10/10 on `fake`; tool catalog = 22 tools; 10 agents (submission_engineer is the terminal, approval-gated pipeline stage).
 
 ---
 

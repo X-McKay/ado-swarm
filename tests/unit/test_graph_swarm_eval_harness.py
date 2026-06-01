@@ -16,7 +16,11 @@ def test_triage_graph_template_order_is_dependency_safe() -> None:
         "risk_auditor",
         "solutions_architect",
         "test_engineer",
+        "submission_engineer",
     ]
+    # The submission stage is approval-gated.
+    submission = next(n for n in graph.nodes if n.node_id == "submission_engineer")
+    assert submission.requires_approval is True
 
 
 def test_bounded_swarm_experiment_rejects_unknown_agents() -> None:

@@ -5,6 +5,7 @@ from datetime import UTC, datetime
 from ado_swarm.contracts.source_provider import (
     ProviderMutationResult,
     SourceBranch,
+    SourceCommit,
     SourceFile,
     SourceIssue,
     SourceIssuePage,
@@ -76,6 +77,20 @@ class StubSourceProvider:
         return SourceFile(
             repository=repository, path=path, ref=ref, content="stub content\n", sha="stub-sha"
         )
+
+    async def list_commits(
+        self, repository: SourceRepositoryRef, path: str, *, ref: str = "main", limit: int = 20
+    ) -> list[SourceCommit]:
+        return [
+            SourceCommit(
+                repository=repository,
+                sha="stub-sha-1",
+                message=f"stub commit touching {path}",
+                author="stub-author",
+                committed_at=datetime(2024, 1, 1, tzinfo=UTC),
+                url="https://example.invalid/commit/stub-sha-1",
+            )
+        ][:limit]
 
     async def create_draft_pr(
         self,

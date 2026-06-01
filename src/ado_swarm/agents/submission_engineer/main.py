@@ -36,9 +36,7 @@ class SubmissionEngineerAgent(CasefileAgent):
         validation = (
             casefile.validation.model_dump_json(indent=2) if casefile.validation else "null"
         )
-        execution = (
-            casefile.execution.model_dump_json(indent=2) if casefile.execution else "null"
-        )
+        execution = casefile.execution.model_dump_json(indent=2) if casefile.execution else "null"
         return (
             "Prepare the submission for this validated remediation. Only open a DRAFT pull "
             "request (provider_create_draft_pr) and post a disposition comment "

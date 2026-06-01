@@ -71,6 +71,17 @@ class SourceBranch(BaseModel):
     provider_payload: dict[str, Any] = Field(default_factory=dict)
 
 
+class SourceCommit(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    repository: SourceRepositoryRef
+    sha: str
+    message: str
+    author: str | None = None
+    committed_at: datetime | None = None
+    url: str | None = None
+
+
 class SourcePullRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 

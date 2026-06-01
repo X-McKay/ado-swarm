@@ -28,6 +28,7 @@ from ado_swarm.tools.catalog.remediation import (
     propose_remediation_strategy,
 )
 from ado_swarm.tools.catalog.repository import (
+    git_log_path,
     repo_grep,
     repo_parse_manifest,
     resolve_repository,
@@ -44,6 +45,7 @@ CATALOG: dict[str, Any] = {
     "verify_file_location": verify_file_location,
     "repo_grep": repo_grep,
     "repo_parse_manifest": repo_parse_manifest,
+    "git_log_path": git_log_path,
     "score_severity": score_severity,
     "adjudication_signals": adjudication_signals,
     "propose_remediation_strategy": propose_remediation_strategy,

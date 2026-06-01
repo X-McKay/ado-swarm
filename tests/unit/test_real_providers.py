@@ -7,6 +7,7 @@ import pytest
 import respx
 
 from ado_swarm.contracts.source_provider import (
+    SourceCommit,
     SourceFile,
     SourceIssue,
     SourceProviderKind,
@@ -350,3 +351,67 @@ async def test_provider_usable_without_context_manager() -> None:
         assert repo.name == "repo"
     finally:
         await provider.aclose()
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_ado_list_commits_parses_contract() -> None:
+    repo = SourceRepositoryRef(
+        provider=SourceProviderKind.AZURE_DEVOPS,
+        external_id="repo-1",
+        owner_or_project=ADO_PROJECT,
+        name="repo",
+    )
+    respx.get(f"{ADO_BASE}/git/repositories/repo-1/commits").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "value": [
+                    {
+                        "commitId": "sha1",
+                        "comment": "fix the bug",
+                        "author": {"name": "Dev", "date": "2024-03-01T10:00:00Z"},
+                        "remoteUrl": "https://dev.azure.com/c/_git/repo/commit/sha1",
+                    }
+                ]
+            },
+        )
+    )
+    async with AzureDevOpsSourceProvider(ADO_ORG, ADO_PROJECT, "pat") as provider:
+        commits = await provider.list_commits(repo, "src/app.py", ref="main", limit=10)
+    assert len(commits) == 1
+    assert isinstance(commits[0], SourceCommit)
+    assert commits[0].sha == "sha1"
+    assert commits[0].author == "Dev"
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_github_list_commits_parses_contract() -> None:
+    repo = SourceRepositoryRef(
+        provider=SourceProviderKind.GITHUB,
+        external_id="octo/repo",
+        owner_or_project="octo",
+        name="repo",
+    )
+    respx.get(f"{GH_BASE}/repos/octo/repo/commits").mock(
+        return_value=httpx.Response(
+            200,
+            json=[
+                {
+                    "sha": "abc123",
+                    "html_url": "https://github.com/octo/repo/commit/abc123",
+                    "commit": {
+                        "message": "patch CVE",
+                        "author": {"name": "Octocat", "date": "2024-03-01T10:00:00Z"},
+                    },
+                }
+            ],
+        )
+    )
+    async with GitHubSourceProvider("token", "octo") as provider:
+        commits = await provider.list_commits(repo, "src/app.py", ref="main", limit=10)
+    assert len(commits) == 1
+    assert commits[0].sha == "abc123"
+    assert commits[0].message == "patch CVE"
+    assert commits[0].author == "Octocat"

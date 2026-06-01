@@ -9,6 +9,7 @@ import httpx
 from ado_swarm.contracts.source_provider import (
     ProviderMutationResult,
     SourceBranch,
+    SourceCommit,
     SourceFile,
     SourceIssue,
     SourceIssuePage,
@@ -166,6 +167,34 @@ class AzureDevOpsSourceProvider(HttpProviderMixin):
             sha=data.get("commitId"),
             url=data.get("url"),
         )
+
+    async def list_commits(
+        self, repository: SourceRepositoryRef, path: str, *, ref: str = "main", limit: int = 20
+    ) -> list[SourceCommit]:
+        data = await self._request(
+            "GET",
+            f"/git/repositories/{repository.external_id}/commits",
+            params={
+                "api-version": "7.1",
+                "searchCriteria.itemPath": path,
+                "searchCriteria.itemVersion.version": ref,
+                "searchCriteria.$top": limit,
+            },
+        )
+        commits: list[SourceCommit] = []
+        for entry in data.get("value", [])[:limit]:
+            author = entry.get("author", {})
+            commits.append(
+                SourceCommit(
+                    repository=repository,
+                    sha=entry.get("commitId", ""),
+                    message=entry.get("comment", ""),
+                    author=author.get("name"),
+                    committed_at=self._parse_dt(author.get("date")),
+                    url=entry.get("remoteUrl") or entry.get("url"),
+                )
+            )
+        return commits
 
     async def create_draft_pr(
         self,

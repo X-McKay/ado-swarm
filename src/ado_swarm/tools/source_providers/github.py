@@ -9,6 +9,7 @@ import httpx
 from ado_swarm.contracts.source_provider import (
     ProviderMutationResult,
     SourceBranch,
+    SourceCommit,
     SourceFile,
     SourceIssue,
     SourceIssuePage,
@@ -165,6 +166,33 @@ class GitHubSourceProvider(HttpProviderMixin):
             sha=data.get("sha"),
             url=data.get("html_url"),
         )
+
+    async def list_commits(
+        self, repository: SourceRepositoryRef, path: str, *, ref: str = "main", limit: int = 20
+    ) -> list[SourceCommit]:
+        data = await self._request(
+            "GET",
+            f"/repos/{repository.owner_or_project}/{repository.name}/commits",
+            params={"path": path, "sha": ref, "per_page": limit},
+        )
+        commits: list[SourceCommit] = []
+        for entry in (data or [])[:limit]:
+            commit = entry.get("commit", {})
+            author = commit.get("author", {})
+            committed_at = None
+            if author.get("date"):
+                committed_at = datetime.fromisoformat(author["date"].replace("Z", "+00:00"))
+            commits.append(
+                SourceCommit(
+                    repository=repository,
+                    sha=entry.get("sha", ""),
+                    message=commit.get("message", ""),
+                    author=author.get("name"),
+                    committed_at=committed_at,
+                    url=entry.get("html_url"),
+                )
+            )
+        return commits
 
     async def create_draft_pr(
         self,

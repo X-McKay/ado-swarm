@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from ado_swarm.tools.catalog import CATALOG
 from ado_swarm.tools.catalog.repository import (
+    git_log_path_impl,
     parse_manifest_impl,
     repo_grep_impl,
     repo_parse_manifest_impl,
@@ -20,6 +21,21 @@ STUB_REPO = {
 def test_new_repo_tools_registered() -> None:
     assert "repo_grep" in CATALOG
     assert "repo_parse_manifest" in CATALOG
+    assert "git_log_path" in CATALOG
+
+
+async def test_git_log_path_returns_commits_from_stub() -> None:
+    out = await git_log_path_impl(STUB_REPO, "src/app.py", "main", 20)
+    assert out["commit_count"] == 1
+    commit = out["commits"][0]
+    assert commit["sha"] == "stub-sha-1"
+    assert "src/app.py" in commit["message"]
+    assert commit["author"] == "stub-author"
+
+
+async def test_git_log_path_respects_limit() -> None:
+    out = await git_log_path_impl(STUB_REPO, "src/app.py", "main", 0)
+    assert out["commit_count"] == 0
 
 
 async def test_repo_grep_matches_pattern() -> None:

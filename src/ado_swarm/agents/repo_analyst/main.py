@@ -20,6 +20,7 @@ class RepoAnalystAgent(CasefileAgent):
         "verify_file_location",
         "repo_grep",
         "repo_parse_manifest",
+        "git_log_path",
     ]
 
     def reasoning_prompt(self, casefile: SecurityCasefile) -> str:
@@ -29,7 +30,9 @@ class RepoAnalystAgent(CasefileAgent):
             "referenced file exists at the resolved ref. When the finding cites a code pattern, "
             "use repo_grep to confirm the pattern is actually present at the location; for a "
             "dependency finding, use repo_parse_manifest to confirm the affected package/version. "
-            "Base your evidence on what the tools return, not assumptions.\n\n"
+            "Use git_log_path to inspect the file's recent commit history when staleness or a "
+            "recent fix is in question. Base your evidence on what the tools return, not "
+            "assumptions.\n\n"
             f"Casefile:\n{casefile.model_dump_json(indent=2)}"
         )
 

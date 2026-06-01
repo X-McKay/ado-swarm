@@ -18,6 +18,7 @@ tools:
     - verify_file_location
     - repo_grep
     - repo_parse_manifest
+    - git_log_path
   denied:
     - provider_create_draft_pr
     - git_write
