@@ -3,6 +3,17 @@
 **Date:** 2026-05-31
 **Context:** All 9 agents are now model-driven (tools in a loop). This review maps what each agent can *actually do* (tools) vs. what its skills *tell it to do*, surfaces gaps, and recommends tools/skills worth adding or exploring.
 
+## Implemented since this review
+
+The wiring table below reflects the original snapshot; subsequently delivered on `feature/claude-cleanup`:
+- **Knowledge tools** `graphiti_search` / `graphiti_add_episode` (`tools/catalog/knowledge.py`, via `knowledge/providers.py`) — recall wired into `security_reviewer` for duplicate/stale evidence (activates duplicate-finding-adjudication, campaign-discovery, false-positive-pattern-mining).
+- **Provider read tools** `provider_get_issue` / `provider_search_issues` / `provider_get_repo_metadata` (`tools/catalog/provider.py`).
+- **Verification governor** `run_validation_command` (`tools/catalog/verification.py`) — runs allowlisted tests/lint/build in a sandbox (`sandbox/provider.py::run_command`, `shell=False`, timeout, output caps); wired into `test_engineer` so checks are *run*, not just proposed. A non-zero exit is a hard failure.
+- **Bounded adjudication swarm** for `security_reviewer` (ADR-0009), opt-in + eval-gated.
+- All 26 `SKILL.md` bodies replaced with real, distinct guidance referencing only real catalog tools.
+
+Catalog is now 16 tools. Still open: repository-investigation tools (`repo_grep`, `git_log_path`), real provider write tools for the draft-PR path, and a real Graphiti/Neo4j backend behind `KnowledgeStore`.
+
 ## 1. Current wiring
 
 | Agent | Section | Tools (capabilities) | Skills (expertise) |

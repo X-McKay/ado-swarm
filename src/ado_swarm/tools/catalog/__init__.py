@@ -26,6 +26,7 @@ from ado_swarm.tools.catalog.repository import resolve_repository, verify_file_l
 from ado_swarm.tools.catalog.risk import score_severity
 from ado_swarm.tools.catalog.triage import normalize_finding
 from ado_swarm.tools.catalog.validation import propose_validation_checks
+from ado_swarm.tools.catalog.verification import run_validation_command
 
 CATALOG: dict[str, Any] = {
     "normalize_finding": normalize_finding,
@@ -38,6 +39,8 @@ CATALOG: dict[str, Any] = {
     "assess_readiness": assess_readiness,
     "summarize_findings": summarize_findings,
     "apply_remediation_change": apply_remediation_change,
+    # Verification governor (sandboxed, allowlisted command execution)
+    "run_validation_command": run_validation_command,
     # Knowledge (graph-memory) tools
     "graphiti_search": graphiti_search,
     "graphiti_add_episode": graphiti_add_episode,

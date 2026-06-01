@@ -15,7 +15,7 @@ class TestEngineerAgent(CasefileAgent):
 
     section_field: ClassVar[str] = "validation"
     section_model: ClassVar[type[BaseModel] | None] = ValidationResult
-    tool_names: ClassVar[list[str]] = ["propose_validation_checks"]
+    tool_names: ClassVar[list[str]] = ["propose_validation_checks", "run_validation_command"]
 
     def reasoning_prompt(self, casefile: SecurityCasefile) -> str:
         finding = (
@@ -30,8 +30,10 @@ class TestEngineerAgent(CasefileAgent):
         )
         return (
             "Define the validation and build checks needed before this finding is ready for "
-            "review, and decide readiness. Call propose_validation_checks with the finding and "
-            "remediation plan for the baseline.\n\n"
+            "review, and decide readiness. Call propose_validation_checks for the baseline "
+            "checklist; when a sandbox is available, run the actual checks with "
+            "run_validation_command and treat a non-zero exit as a hard failure (do not mark "
+            "ready_for_review unless the checks pass).\n\n"
             f"Finding:\n{finding}\n\nRemediation plan:\n{plan}"
         )
 

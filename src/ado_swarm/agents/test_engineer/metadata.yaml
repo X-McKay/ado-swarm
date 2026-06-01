@@ -15,6 +15,7 @@ skills:
 tools:
   allowed:
     - propose_validation_checks
+    - run_validation_command
   denied:
     - provider_create_draft_pr
     - git_write

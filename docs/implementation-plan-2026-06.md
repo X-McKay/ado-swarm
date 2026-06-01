@@ -15,9 +15,10 @@
 - **Phase 2 — done.** Approvals as Temporal Updates+validators wired into the supervisor; typed non-retryable errors; `TaskSpec.max_attempts` honored; write tools approval-gated via `ToolContext` (ADR-0009).
 - **Phase 3 (DX) — done.** `ado-swarm agents run` / `skills list|show|lint` / `scaffold agent|tool|skill`; `just` recipes; `CLAUDE.md`; `ado-swarm-add-agent` Claude skill; docs + ADR-0008 sweep.
 - **Phase 4 — in progress.** Done: asyncpg connection pooling + versioned migration runner; source-provider hardening (async-ctx lifecycle, `_request` helper, 429/Retry-After retries, pagination, `ProviderError`); real token/budget capture into `AgentResult.budget_usage`; honest `/health`; knowledge tools (`graphiti_search`/`graphiti_add_episode`) + provider-read tools (`provider_get_issue`/`provider_search_issues`/`provider_get_repo_metadata`), recall wired into `security_reviewer`; collapsed the duplicate plan/DAG into one graph template (review §3.1); all 26 `SKILL.md` bodies rewritten with real guidance. Remaining: real Graphiti/Neo4j `KnowledgeStore` backend; OTel GenAI tracing; provider-contract semantics pinning (`external_id`, mutation-result ids).
-- **Not started.** Repository-investigation tools (`repo_grep`, `git_log_path`) and sandboxed test/build tools; promoting the swarm default after an eval comparison.
+- **Verification governor — done.** Sandboxed, allowlisted `run_validation_command` (`tools/catalog/verification.py` + `sandbox/provider.py::run_command`) wired into `test_engineer`: tests/lint/build are *run* (not just proposed), non-zero exit is a hard failure (the harness "governor").
+- **Not started.** Repository-investigation tools (`repo_grep`, `git_log_path`); real provider write tools for the draft-PR path; a real Graphiti/Neo4j backend behind `KnowledgeStore`; OTel GenAI tracing; provider-contract semantics pinning; promoting the swarm default after an eval comparison.
 
-Gate status: `ruff` + `ruff format` + `ty` clean; 125 unit/workflow tests pass (4 skipped); `eval-agents` 9/9 on `fake`.
+Gate status: `ruff` + `ruff format` + `ty` clean; 132 unit/workflow tests pass (4 skipped); `eval-agents` 9/9 on `fake`; tool catalog = 16 tools.
 
 ---
 
