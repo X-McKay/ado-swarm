@@ -13,6 +13,7 @@ from pydantic import BaseModel
 from strands import Agent
 from strands.models import Model
 
+from ado_swarm.runtime.telemetry import setup_telemetry, trace_attributes
 from ado_swarm.skills.runtime import build_skills_plugin
 from ado_swarm.tools.catalog import get_tools
 from ado_swarm.tools.policy import ToolContext, ToolPolicy
@@ -66,6 +67,9 @@ async def run_model_agent(
     # harness machinery and must bypass the domain tool policy.
     hook = ToolPolicyHook(policy, tool_context, harness_tools={output_model.__name__})
     plugin = build_skills_plugin(skill_names)
+    # Config-gated OTel: no-op unless tracing is enabled. Attach service identity +
+    # the agent id so GenAI spans are attributable to a specific agent.
+    setup_telemetry()
     agent = Agent(
         model=model,
         tools=get_tools(tool_names),
@@ -73,6 +77,7 @@ async def run_model_agent(
         hooks=[hook],
         system_prompt=system_prompt,
         callback_handler=None,
+        trace_attributes={**trace_attributes(), "ado_swarm.agent_id": tool_context.agent_id or ""},
     )
     result = await agent.invoke_async(
         reasoning_prompt,

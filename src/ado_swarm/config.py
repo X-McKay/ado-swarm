@@ -26,6 +26,8 @@ class Settings(BaseSettings):
     model_base_url: str | None = None
     security_reviewer_use_swarm: bool = False
     adjudication_swarm_max_model_calls: int = 8
+    tracing_enabled: bool = False
+    otel_exporter: Literal["otlp", "console"] = "otlp"
     ado_org_url: str | None = None
     ado_project: str | None = None
     ado_pat: str | None = Field(default=None, repr=False)

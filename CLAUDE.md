@@ -30,6 +30,7 @@ just agent-run <id> --source-issue f.json            # run one agent against a f
 uv run python -m ado_swarm.agents.<id>.eval --model-profile fake   # one agent's golden eval
 just skills-list / just skills-show <name> / just skills-lint
 just new-agent <id> / just new-tool <name> <area> / just new-skill <name>
+uv run ado-swarm eval-swarm --model-profile ollama    # single-agent vs swarm adjudication comparison
 MODEL_PROVIDER=ollama just eval-agents                # evals against a real local model
 ```
 

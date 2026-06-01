@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 from ado_swarm.contracts.source_provider import (
+    MutationResultKind,
     ProviderMutationResult,
     SourceBranch,
     SourceCommit,
@@ -53,10 +54,11 @@ class StubSourceProvider:
         return ProviderMutationResult(
             provider=SourceProviderKind.STUB,
             ok=True,
-            external_id=external_id,
+            result_kind=MutationResultKind.ISSUE_COMMENT,
+            external_id="stub-comment-1",
             url=f"https://example.invalid/issues/{external_id}#comment-1",
             message="stub issue comment recorded",
-            provider_payload={"body": body},
+            provider_payload={"body": body, "issue_external_id": external_id},
         )
 
     async def get_repository(self, owner_or_project: str, name: str) -> SourceRepositoryRef:
@@ -117,8 +119,9 @@ class StubSourceProvider:
         return ProviderMutationResult(
             provider=SourceProviderKind.STUB,
             ok=True,
-            external_id=pr_external_id,
+            result_kind=MutationResultKind.PR_COMMENT,
+            external_id="stub-pr-comment-1",
             url=f"{repository.web_url}/pull/{pr_external_id}#comment-1",
             message="stub pull request comment recorded",
-            provider_payload={"body": body},
+            provider_payload={"body": body, "pr_external_id": pr_external_id},
         )

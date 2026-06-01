@@ -7,6 +7,7 @@ from typing import Any
 import httpx
 
 from ado_swarm.contracts.source_provider import (
+    MutationResultKind,
     ProviderMutationResult,
     SourceBranch,
     SourceCommit,
@@ -102,7 +103,8 @@ class AzureDevOpsSourceProvider(HttpProviderMixin):
         return ProviderMutationResult(
             provider=SourceProviderKind.AZURE_DEVOPS,
             ok=True,
-            external_id=str(data.get("id", external_id)),
+            result_kind=MutationResultKind.ISSUE_COMMENT,
+            external_id=str(data.get("id", "")),
             url=data.get("url"),
             message="Azure DevOps work item comment created",
             provider_payload=data,
@@ -243,7 +245,8 @@ class AzureDevOpsSourceProvider(HttpProviderMixin):
         return ProviderMutationResult(
             provider=SourceProviderKind.AZURE_DEVOPS,
             ok=True,
-            external_id=str(data.get("id", pr_external_id)),
+            result_kind=MutationResultKind.PR_COMMENT,
+            external_id=str(data.get("id", "")),
             url=data.get("url"),
             message="Azure DevOps pull request thread created",
             provider_payload=data,

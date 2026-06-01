@@ -7,6 +7,7 @@ from typing import Any
 import httpx
 
 from ado_swarm.contracts.source_provider import (
+    MutationResultKind,
     ProviderMutationResult,
     SourceBranch,
     SourceCommit,
@@ -108,6 +109,7 @@ class GitHubSourceProvider(HttpProviderMixin):
         return ProviderMutationResult(
             provider=SourceProviderKind.GITHUB,
             ok=True,
+            result_kind=MutationResultKind.ISSUE_COMMENT,
             external_id=str(data["id"]),
             url=data["html_url"],
             message="GitHub issue comment created",
@@ -236,6 +238,7 @@ class GitHubSourceProvider(HttpProviderMixin):
         return ProviderMutationResult(
             provider=SourceProviderKind.GITHUB,
             ok=True,
+            result_kind=MutationResultKind.PR_COMMENT,
             external_id=str(data["id"]),
             url=data["html_url"],
             message="GitHub pull request comment created",

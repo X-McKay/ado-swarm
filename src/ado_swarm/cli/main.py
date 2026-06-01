@@ -67,6 +67,19 @@ def eval_agents(model_profile: str = "fake", output: str | None = None, trials: 
     typer.echo(text)
 
 
+@app.command("eval-swarm")
+def eval_swarm(model_profile: str = "fake") -> None:
+    """Compare single-agent vs bounded-swarm adjudication; print a recommendation.
+
+    The decision to default the adjudication swarm on (ADR-0009) is data-driven:
+    run this against a real model (e.g. --model-profile ollama) and only enable the
+    swarm if it beats the single-agent agreement rate.
+    """
+    from ado_swarm.evals.swarm_comparison import compare_modes
+
+    typer.echo(json.dumps(asyncio.run(compare_modes(model_profile)), indent=2))
+
+
 @app.command("start-mission")
 def start_mission(goal: str) -> None:
     async def _run() -> dict:
