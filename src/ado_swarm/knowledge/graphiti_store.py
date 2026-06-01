@@ -31,11 +31,16 @@ class KnowledgeStore:
     """
 
     episodes: list[dict[str, Any]] = field(default_factory=list)
+    telemetry: dict[str, Any] = field(default_factory=dict)
 
     async def healthcheck(self) -> dict[str, str]:
         # Be honest: the in-memory backend is not a durable knowledge graph, so a
         # readiness probe should see it as degraded rather than fully "ok".
-        return {"status": "degraded", "backend": "in-memory-graphiti-compatible"}
+        return {
+            "status": "degraded",
+            "backend": "in-memory-graphiti-compatible",
+            "episodes": str(len(self.episodes)),
+        }
 
     async def add_episode(self, name: str, content: dict[str, Any]) -> str:
         episode_id = f"episode-{len(self.episodes) + 1}"
@@ -61,6 +66,19 @@ class GraphitiKnowledgeStore:
         self._user = user
         self._password = password
         self._group_id = group_id
+        self.telemetry: dict[str, Any] = {}
+
+    def _record_degraded(self, operation: str, exc: Exception) -> dict[str, str]:
+        payload = {
+            "status": "degraded",
+            "backend": "graphiti-neo4j-unavailable",
+            "operation": operation,
+            "error_type": type(exc).__name__,
+            "error": str(exc),
+        }
+        self.telemetry[operation] = payload
+        self.telemetry["last_error"] = payload
+        return payload
 
     def _build_client(self) -> Any:
         # Lazy import keeps the optional dependency truly optional.
@@ -72,22 +90,15 @@ class GraphitiKnowledgeStore:
         try:
             client = self._build_client()
         except Exception as exc:  # ImportError or construction failure
-            return {
-                "status": "degraded",
-                "backend": "graphiti-neo4j-unavailable",
-                "error": str(exc),
-            }
+            return self._record_degraded("healthcheck", exc)
         try:
             # build_indices_and_constraints requires a live connection; if it
             # succeeds we know Neo4j is reachable.
             await client.build_indices_and_constraints()
+            self.telemetry["healthcheck"] = {"status": "ok", "backend": "graphiti-neo4j"}
             return {"status": "ok", "backend": "graphiti-neo4j"}
         except Exception as exc:
-            return {
-                "status": "degraded",
-                "backend": "graphiti-neo4j-unavailable",
-                "error": str(exc),
-            }
+            return self._record_degraded("healthcheck", exc)
         finally:
             await _safe_close(client)
 
@@ -96,8 +107,9 @@ class GraphitiKnowledgeStore:
             from graphiti_core.nodes import EpisodeType
 
             client = self._build_client()
-        except Exception:
+        except Exception as exc:
             # Optional dependency missing or client construction failed.
+            self._record_degraded("add_episode", exc)
             return ""
         try:
             result = await client.add_episode(
@@ -111,7 +123,8 @@ class GraphitiKnowledgeStore:
             episode = getattr(result, "episode", None)
             uuid = getattr(episode, "uuid", None)
             return str(uuid) if uuid is not None else ""
-        except Exception:
+        except Exception as exc:
+            self._record_degraded("add_episode", exc)
             return ""
         finally:
             await _safe_close(client)
@@ -119,11 +132,13 @@ class GraphitiKnowledgeStore:
     async def search(self, query: str) -> list[dict[str, Any]]:
         try:
             client = self._build_client()
-        except Exception:
+        except Exception as exc:
+            self._record_degraded("search", exc)
             return []
         try:
             edges = await client.search(query, group_ids=[self._group_id])
-        except Exception:
+        except Exception as exc:
+            self._record_degraded("search", exc)
             return []
         finally:
             await _safe_close(client)

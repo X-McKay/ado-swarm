@@ -9,10 +9,12 @@ import pytest
 
 from ado_swarm.storage.migrations import (
     Migration,
+    MigrationChecksumMismatchError,
     checksum_sql,
     find_migrations_dir,
     load_migrations,
     pending_migrations,
+    validate_applied_checksums,
 )
 
 
@@ -69,6 +71,25 @@ def test_pending_ignores_extra_applied_filenames() -> None:
     migrations = [_migration("0001_a.sql")]
     pending = pending_migrations(migrations, applied_filenames=["0001_a.sql", "9999_gone.sql"])
     assert pending == []
+
+
+def test_validate_applied_checksums_accepts_matching_files() -> None:
+    migration = _migration("0001_a.sql", "CREATE TABLE a();")
+    validate_applied_checksums([migration], {migration.filename: migration.checksum})
+
+
+def test_validate_applied_checksums_ignores_missing_local_files() -> None:
+    validate_applied_checksums([], {"9999_removed.sql": checksum_sql("SELECT 1;")})
+
+
+def test_validate_applied_checksums_rejects_changed_file() -> None:
+    migration = _migration("0001_a.sql", "CREATE TABLE changed();")
+    applied_checksum = checksum_sql("CREATE TABLE original();")
+    with pytest.raises(MigrationChecksumMismatchError) as exc:
+        validate_applied_checksums([migration], {migration.filename: applied_checksum})
+    assert exc.value.filename == "0001_a.sql"
+    assert exc.value.applied_checksum == applied_checksum
+    assert exc.value.current_checksum == migration.checksum
 
 
 def test_find_migrations_dir_is_cwd_independent(tmp_path: Path) -> None:

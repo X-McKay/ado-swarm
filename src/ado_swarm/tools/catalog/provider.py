@@ -8,26 +8,25 @@ from __future__ import annotations
 
 from strands import tool
 
-from ado_swarm.config import get_settings
 from ado_swarm.contracts.source_provider import SourceRepositoryRef
-from ado_swarm.tools.source_providers.factory import build_source_provider
+from ado_swarm.tools.source_providers.providers import get_source_provider
 
 
 async def provider_get_issue_impl(external_id: str) -> dict:
-    provider = build_source_provider(get_settings())
+    provider = get_source_provider()
     issue = await provider.get_issue(external_id)
     return issue.model_dump(mode="json")
 
 
 async def provider_search_issues_impl(query: str, limit: int = 25) -> dict:
-    provider = build_source_provider(get_settings())
+    provider = get_source_provider()
     page = await provider.search_issues(query, limit=limit)
     return page.model_dump(mode="json")
 
 
 async def provider_get_repo_metadata_impl(repository: dict) -> dict:
     repo = SourceRepositoryRef.model_validate(repository)
-    provider = build_source_provider(get_settings())
+    provider = get_source_provider()
     metadata = await provider.get_repository(repo.owner_or_project, repo.name)
     return metadata.model_dump(mode="json")
 

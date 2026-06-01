@@ -36,5 +36,5 @@ def test_reliability_report_uses_pass_k_semantics() -> None:
 
 def test_search_attributes_are_keyword_mapping() -> None:
     attrs = MissionSearchAttributes(run_id="run-1", repository="acme/api").as_keywords()
-    assert attrs["RunId"] == "run-1"
-    assert attrs["Repository"] == "acme/api"
+    assert attrs["RunId"] == ["run-1"]
+    assert attrs["Repository"] == ["acme/api"]

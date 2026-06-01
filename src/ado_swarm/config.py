@@ -3,7 +3,7 @@ from __future__ import annotations
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import Field
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -33,6 +33,16 @@ class Settings(BaseSettings):
     ado_pat: str | None = Field(default=None, repr=False)
     github_token: str | None = Field(default=None, repr=False)
     github_owner: str | None = None
+
+    @model_validator(mode="after")
+    def validate_source_provider_credentials(self) -> Settings:
+        if self.source_provider == "azure_devops" and not (
+            self.ado_org_url and self.ado_project and self.ado_pat
+        ):
+            raise ValueError("ADO_ORG_URL, ADO_PROJECT, and ADO_PAT are required for azure_devops")
+        if self.source_provider == "github" and not (self.github_token and self.github_owner):
+            raise ValueError("GITHUB_TOKEN and GITHUB_OWNER are required for github")
+        return self
 
 
 @lru_cache

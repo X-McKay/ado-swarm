@@ -13,17 +13,20 @@ optional model dependencies installed.
 
 from __future__ import annotations
 
-import datetime as _dt
-import enum
 import json
 import uuid
-from collections.abc import AsyncGenerator, Callable, Sequence
+from collections.abc import AsyncGenerator, Sequence
 from typing import TYPE_CHECKING, Any, TypeVar, cast
 
 from pydantic import BaseModel
-from pydantic.fields import FieldInfo
 
+from ado_swarm.model_gateway.factory import build_provider_model
 from ado_swarm.model_gateway.gateway import ModelProfile
+from ado_swarm.model_gateway.structured_output import (
+    StructuredResponder,
+    resolve_structured_instance,
+    synthesize_model,
+)
 
 if TYPE_CHECKING:
     from strands.models import Model as _StrandsModel
@@ -34,9 +37,6 @@ if TYPE_CHECKING:
 from strands.models import Model
 
 T = TypeVar("T", bound=BaseModel)
-
-# A deterministic fixed epoch used whenever a datetime value must be synthesized.
-_FIXED_EPOCH = _dt.datetime(2020, 1, 1, 0, 0, 0, tzinfo=_dt.UTC)
 
 
 class ToolCall(BaseModel):
@@ -63,10 +63,6 @@ class ScriptStep(BaseModel):
 
     text: str = ""
     tool_calls: list[ToolCall] = []
-
-
-# Type alias for the structured-output responder hook.
-StructuredResponder = Callable[[type[BaseModel], "Messages"], BaseModel]
 
 
 class FakeModel(Model):
@@ -368,25 +364,13 @@ class FakeModel(Model):
     def _resolve_structured_instance(
         self, output_model: type[BaseModel], messages: Messages
     ) -> BaseModel:
-        """Resolve a structured-output instance using the existing precedence.
-
-        Order: ``structured_responder`` -> ``structured_outputs[output_model]``
-        -> synthesized instance. Validates the result is an instance of
-        ``output_model`` (matching :meth:`structured_output`).
-        """
-        if self._structured_responder is not None:
-            instance: BaseModel = self._structured_responder(output_model, messages)
-        elif output_model in self._structured_outputs:
-            instance = self._structured_outputs[output_model]
-        else:
-            instance = self._synthesize_model(output_model)
-
-        if not isinstance(instance, output_model):
-            raise TypeError(
-                f"Structured output for {output_model.__name__} is "
-                f"{type(instance).__name__}, expected an instance of {output_model.__name__}"
-            )
-        return instance
+        """Resolve a structured-output instance using the shared helper."""
+        return resolve_structured_instance(
+            output_model,
+            messages,
+            structured_outputs=self._structured_outputs,
+            structured_responder=self._structured_responder,
+        )
 
     # -- structured output ---------------------------------------------------
 
@@ -404,76 +388,7 @@ class FakeModel(Model):
     @classmethod
     def _synthesize_model(cls, output_model: type[T]) -> T:
         """Build a valid instance filling required fields with zero-values."""
-        values: dict[str, Any] = {}
-        for name, field in output_model.model_fields.items():
-            if not field.is_required():
-                continue
-            values[name] = cls._synthesize_field(field)
-        return output_model(**values)
-
-    @classmethod
-    def _synthesize_field(cls, field: FieldInfo) -> Any:
-        """Synthesize a deterministic, type-appropriate value for a field."""
-        return cls._synthesize_value(field.annotation)
-
-    @classmethod
-    def _synthesize_value(cls, annotation: Any) -> Any:
-        """Return a deterministic zero-value for the given type annotation."""
-        import typing
-
-        origin = typing.get_origin(annotation)
-        args = typing.get_args(annotation)
-
-        # Optional / Union: pick the first non-None member.
-        if origin in (typing.Union,) or _is_union(annotation):
-            non_none = [a for a in args if a is not type(None)]
-            if not non_none:
-                return None
-            return cls._synthesize_value(non_none[0])
-
-        if origin in (list, set, tuple, frozenset):
-            return [] if origin is not tuple else ()
-        if origin is dict:
-            return {}
-
-        if isinstance(annotation, type):
-            if issubclass(annotation, enum.Enum):
-                return next(iter(annotation))
-            if issubclass(annotation, BaseModel):
-                return cls._synthesize_model(annotation)
-            if issubclass(annotation, bool):
-                return False
-            if issubclass(annotation, int):
-                return 0
-            if issubclass(annotation, float):
-                return 0.0
-            if issubclass(annotation, str):
-                return ""
-            if issubclass(annotation, bytes):
-                return b""
-            if issubclass(annotation, _dt.datetime):
-                return _FIXED_EPOCH
-            if issubclass(annotation, _dt.date):
-                return _FIXED_EPOCH.date()
-            if issubclass(annotation, (list, set, frozenset)):
-                return []
-            if issubclass(annotation, dict):
-                return {}
-
-        # Fallback for bare ``list``/``dict``/``Any`` and anything unknown.
-        if annotation in (list, Sequence):
-            return []
-        if annotation is dict:
-            return {}
-        return None
-
-
-def _is_union(annotation: Any) -> bool:
-    """Return True for both ``typing.Union`` and PEP 604 ``X | Y`` unions."""
-    import types
-    import typing
-
-    return typing.get_origin(annotation) is typing.Union or isinstance(annotation, types.UnionType)
+        return synthesize_model(output_model)
 
 
 def _deterministic_tool_use_id(step_index: int, tool_name: str) -> str:
@@ -501,37 +416,6 @@ def build_strands_model(profile: ModelProfile, **fake_kwargs: Any) -> _StrandsMo
     Raises:
         ValueError: If the provider is not supported.
     """
-    provider = profile.provider
-
-    if provider == "fake":
-        return FakeModel(profile, **fake_kwargs)
-
-    if provider == "ollama":
-        from strands.models.ollama import OllamaModel
-
-        return OllamaModel(host=profile.base_url, model_id=profile.model_id)
-
-    if provider in ("openai", "openai_compatible"):
-        from strands.models.openai import OpenAIModel
-
-        return OpenAIModel(
-            client_args={
-                "api_key": profile.api_key or "not-needed",
-                "base_url": profile.base_url,
-            },
-            model_id=profile.model_id,
-            params=profile.params
-            or {"temperature": profile.temperature, "max_tokens": profile.max_tokens},
-        )
-
-    if provider == "litellm":
-        from strands.models.litellm import LiteLLMModel
-
-        return LiteLLMModel(model_id=profile.model_id)
-
-    if provider == "bedrock":
-        from strands.models import BedrockModel
-
-        return BedrockModel(model_id=profile.model_id, region_name=profile.region)
-
-    raise ValueError(f"Unsupported model provider: {provider}")
+    return build_provider_model(
+        profile, fake_model_factory=lambda fake_profile: FakeModel(fake_profile, **fake_kwargs)
+    )

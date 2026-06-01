@@ -42,6 +42,19 @@ class Migration:
         return checksum_sql(self.sql)
 
 
+class MigrationChecksumMismatchError(RuntimeError):
+    """Raised when an already-applied migration file has changed on disk."""
+
+    def __init__(self, filename: str, applied_checksum: str, current_checksum: str) -> None:
+        super().__init__(
+            f"Migration {filename} checksum changed after being applied: "
+            f"applied={applied_checksum}, current={current_checksum}"
+        )
+        self.filename = filename
+        self.applied_checksum = applied_checksum
+        self.current_checksum = current_checksum
+
+
 def checksum_sql(sql: str) -> str:
     """Stable content hash of a migration's SQL (newline-normalised)."""
     normalised = sql.replace("\r\n", "\n").encode("utf-8")
@@ -71,6 +84,20 @@ def load_migrations(migrations_dir: Path | None = None) -> list[Migration]:
     ]
 
 
+def validate_applied_checksums(
+    migrations: Iterable[Migration], applied_checksums: dict[str, str]
+) -> None:
+    """Fail if an already-applied migration's SQL no longer matches its ledger hash."""
+    by_filename = {migration.filename: migration for migration in migrations}
+    for filename, applied_checksum in applied_checksums.items():
+        migration = by_filename.get(filename)
+        if migration is None:
+            continue
+        current_checksum = migration.checksum
+        if current_checksum != applied_checksum:
+            raise MigrationChecksumMismatchError(filename, applied_checksum, current_checksum)
+
+
 def pending_migrations(
     migrations: Iterable[Migration], applied_filenames: Iterable[str]
 ) -> list[Migration]:
@@ -93,8 +120,10 @@ async def apply_migrations(
     applied_now: list[str] = []
     try:
         await conn.execute(SCHEMA_MIGRATIONS_DDL)
-        rows = await conn.fetch("SELECT filename FROM schema_migrations")
-        already_applied = [row["filename"] for row in rows]
+        rows = await conn.fetch("SELECT filename, checksum FROM schema_migrations")
+        applied_checksums = {row["filename"]: row["checksum"] for row in rows}
+        validate_applied_checksums(migrations, applied_checksums)
+        already_applied = list(applied_checksums)
 
         for migration in pending_migrations(migrations, already_applied):
             async with conn.transaction():

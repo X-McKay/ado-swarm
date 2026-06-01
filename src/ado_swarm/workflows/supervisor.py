@@ -11,6 +11,11 @@ with workflow.unsafe.imports_passed_through():
     from ado_swarm.runtime.artifacts import plan_artifact
     from ado_swarm.temporal.policies import ActivityRetryProfile, retry_policy
     from ado_swarm.workflows.agent_task import AgentTaskWorkflow
+    from ado_swarm.workflows.scheduling import (
+        collect_dependency_artifacts,
+        runnable_tasks,
+        task_with_runtime_context,
+    )
 
 
 @workflow.defn(name="SupervisorWorkflow")
@@ -53,11 +58,7 @@ class SupervisorWorkflow:
                 self.snapshot.status = RunStatus.WAITING_FOR_APPROVAL
                 self.snapshot.blocked_reason = "replan requested"
                 return self.snapshot
-            runnable = [
-                task
-                for task in pending.values()
-                if all(dep in completed for dep in task.depends_on)
-            ]
+            runnable = runnable_tasks(pending, completed)
             if not runnable:
                 self.snapshot.status = RunStatus.FAILED
                 self.snapshot.blocked_reason = "Plan has unresolved dependencies after validation."
@@ -89,15 +90,10 @@ class SupervisorWorkflow:
                     self.snapshot.status = RunStatus.RUNNING
                     self.snapshot.blocked_reason = None
 
-                dependency_artifacts: list[ArtifactRef] = []
-                for dependency_id in task.depends_on:
-                    dependency_artifacts.extend(artifacts_by_task.get(dependency_id, []))
-                updates: dict = {}
-                if dependency_artifacts:
-                    updates["input_refs"] = [*task.input_refs, *dependency_artifacts]
-                if approved:
-                    updates["constraints"] = {**task.constraints, "approved": True}
-                task_for_run = task.model_copy(update=updates) if updates else task
+                dependency_artifacts = collect_dependency_artifacts(task, artifacts_by_task)
+                task_for_run = task_with_runtime_context(
+                    task, dependency_artifacts=dependency_artifacts, approved=approved
+                )
                 self.snapshot.task_states[task.task_id] = TaskState.RUNNING
                 raw_result = await workflow.execute_child_workflow(
                     AgentTaskWorkflow.run,
@@ -105,6 +101,12 @@ class SupervisorWorkflow:
                     id=f"agent-task:{run_id}:{task.task_id}",
                 )
                 result = AgentResult.model_validate(raw_result)
+                if self.cancel_requested:
+                    self.snapshot.status = RunStatus.CANCELLED
+                    self.snapshot.blocked_reason = (
+                        self.snapshot.blocked_reason or "cancel requested"
+                    )
+                    return self.snapshot
                 self.snapshot.task_states[task.task_id] = result.state
                 self.snapshot.artifact_refs.extend(result.artifact_refs)
                 artifacts_by_task[task.task_id] = result.artifact_refs

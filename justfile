@@ -62,13 +62,13 @@ skills-show name:
 skills-lint:
   uv run ado-swarm skills lint
 
-new-agent id section="TODO_section" tool="TODO_tool":
-  uv run ado-swarm scaffold agent {{id}} --section-field {{section}} --tool {{tool}}
+new-agent id section="readiness" tool="assess_readiness" section_model="ReadinessVerdict":
+  uv run ado-swarm scaffold agent {{id}} --section-field {{section}} --tool {{tool}} --section-model {{section_model}}
 
 new-tool name area:
   uv run ado-swarm scaffold tool {{name}} {{area}}
 
-new-skill name description="TODO: when to use this skill":
+new-skill name description="Use this skill for repository-specific work":
   uv run ado-swarm scaffold skill {{name}} --description "{{description}}"
 
 up:

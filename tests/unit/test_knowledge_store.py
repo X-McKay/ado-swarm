@@ -47,6 +47,7 @@ async def test_in_memory_store_roundtrip() -> None:
     assert misses == []
     health = await store.healthcheck()
     assert health["status"] == "degraded"
+    assert health["episodes"] == "1"
 
 
 def test_get_knowledge_store_returns_in_memory_by_default(monkeypatch) -> None:
@@ -64,22 +65,35 @@ def test_get_knowledge_store_selects_graphiti(monkeypatch) -> None:
 
 
 async def test_graphiti_healthcheck_degrades_without_backend(monkeypatch) -> None:
-    # No live Neo4j (and possibly no graphiti-core): healthcheck must report
-    # degraded rather than raising.
+    # No live Neo4j required: construction failure must report degraded rather than raising.
     monkeypatch.setattr(providers, "get_settings", lambda: _settings(knowledge_backend="graphiti"))
+    monkeypatch.setattr(
+        GraphitiKnowledgeStore,
+        "_build_client",
+        lambda self: (_ for _ in ()).throw(RuntimeError("backend unavailable")),
+    )
     store = get_knowledge_store()
     assert isinstance(store, GraphitiKnowledgeStore)
     health = await store.healthcheck()
     assert health["status"] == "degraded"
     assert health["backend"] == "graphiti-neo4j-unavailable"
+    assert health["operation"] == "healthcheck"
     assert "error" in health
+    assert store.telemetry["last_error"] == health
 
 
-async def test_graphiti_search_and_add_degrade_gracefully() -> None:
+async def test_graphiti_search_and_add_degrade_gracefully(monkeypatch) -> None:
+    monkeypatch.setattr(
+        GraphitiKnowledgeStore,
+        "_build_client",
+        lambda self: (_ for _ in ()).throw(RuntimeError("backend unavailable")),
+    )
     store = GraphitiKnowledgeStore("bolt://localhost:7687", "neo4j", "")
     # Without a live backend these must not raise; they return empty/sentinel.
     assert await store.search("anything") == []
+    assert store.telemetry["last_error"]["operation"] == "search"
     assert await store.add_episode("name", {"k": "v"}) == ""
+    assert store.telemetry["last_error"]["operation"] == "add_episode"
 
 
 def test_set_knowledge_store_injection() -> None:

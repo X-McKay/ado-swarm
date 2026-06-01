@@ -2,10 +2,9 @@ from __future__ import annotations
 
 from temporalio import activity
 
-from ado_swarm.config import get_settings
 from ado_swarm.contracts.mission import PlanVersion, TaskSpec
 from ado_swarm.runtime.graph_templates import GraphTemplate, triage_readonly_graph
-from ado_swarm.tools.source_providers.factory import build_source_provider
+from ado_swarm.tools.source_providers.providers import get_source_provider
 
 # Backwards-compatible view of the pipeline (agent_id, title, objective), derived
 # from the single-source-of-truth graph template so the two can never drift.
@@ -55,8 +54,7 @@ def build_plan_from_template(
 
 @activity.defn(name="plan_mission")
 async def plan_mission(run_id: str, goal: str) -> PlanVersion:
-    settings = get_settings()
-    provider = build_source_provider(settings)
+    provider = get_source_provider()
     # The first production increment uses the configured source provider's default
     # issue as a deterministic starting point. API/CLI request-level issue selection
     # can be added later without changing the pipeline handoff contract.

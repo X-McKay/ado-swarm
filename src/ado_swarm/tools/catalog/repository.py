@@ -10,9 +10,9 @@ import re
 
 from strands import tool
 
-from ado_swarm.config import get_settings
 from ado_swarm.contracts.source_provider import SourceIssue, SourceRepositoryRef
-from ado_swarm.tools.source_providers.factory import build_source_provider
+from ado_swarm.tools.manifest_parsers import parse_manifest
+from ado_swarm.tools.source_providers.providers import get_source_provider
 
 
 def resolve_repository_impl(source_issue: dict) -> dict:
@@ -30,7 +30,7 @@ def resolve_repository_impl(source_issue: dict) -> dict:
 
 async def verify_file_location_impl(repository: dict, path: str, ref: str = "main") -> dict:
     repo = SourceRepositoryRef.model_validate(repository)
-    provider = build_source_provider(get_settings())
+    provider = get_source_provider()
     try:
         source_file = await provider.get_file(repo, path, ref)
     except Exception as exc:  # provider read failure is evidence, not a crash
@@ -83,7 +83,7 @@ MAX_GREP_MATCHES = 50
 async def repo_grep_impl(repository: dict, path: str, pattern: str, ref: str = "main") -> dict:
     """Search a single file's content for a regex pattern (read-only)."""
     repo = SourceRepositoryRef.model_validate(repository)
-    provider = build_source_provider(get_settings())
+    provider = get_source_provider()
     try:
         source_file = await provider.get_file(repo, path, ref)
     except Exception as exc:
@@ -108,30 +108,14 @@ async def repo_grep_impl(repository: dict, path: str, pattern: str, ref: str = "
 
 
 def parse_manifest_impl(content: str, path: str) -> dict:
-    """Extract dependency-ish (name, version) hints from a manifest's text (deterministic)."""
-    deps: list[dict] = []
-    lower = path.lower()
-    if lower.endswith(("requirements.txt", ".txt")):
-        for line in content.splitlines():
-            line = line.strip()
-            if not line or line.startswith("#"):
-                continue
-            m = re.match(r"^([A-Za-z0-9._-]+)\s*(==|>=|<=|~=|>|<)\s*([0-9][\w.+-]*)", line)
-            if m:
-                deps.append({"name": m.group(1), "version": m.group(3)})
-    else:
-        # Generic "name": "version" / name = "version" pairs (package.json, toml, etc.)
-        for m in re.finditer(
-            r'["\']?([A-Za-z0-9._@/-]+)["\']?\s*[:=]\s*["\']([\^~>=<]*[0-9][\w.+-]*)["\']',
-            content,
-        ):
-            deps.append({"name": m.group(1), "version": m.group(2)})
+    """Extract dependency hints from a known manifest using format-specific parsers."""
+    deps = parse_manifest(content, path)
     return {"path": path, "dependency_count": len(deps), "dependencies": deps[:200]}
 
 
 async def repo_parse_manifest_impl(repository: dict, path: str, ref: str = "main") -> dict:
     repo = SourceRepositoryRef.model_validate(repository)
-    provider = build_source_provider(get_settings())
+    provider = get_source_provider()
     try:
         source_file = await provider.get_file(repo, path, ref)
     except Exception as exc:
@@ -180,7 +164,7 @@ async def git_log_path_impl(
     repository: dict, path: str, ref: str = "main", limit: int = 20
 ) -> dict:
     repo = SourceRepositoryRef.model_validate(repository)
-    provider = build_source_provider(get_settings())
+    provider = get_source_provider()
     try:
         commits = await provider.list_commits(repo, path, ref=ref, limit=limit)
     except Exception as exc:

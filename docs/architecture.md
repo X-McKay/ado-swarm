@@ -37,5 +37,5 @@ Agents collaborate through a typed `SecurityCasefile` (`contracts/casefile.py`).
 
 ## Decision records
 
-See [`decisions/`](decisions/): Temporal control plane (0001), provider-neutral adapters (0002), model gateway (0003), Strands/Temporal harness runtime (0004), tool policy & approvals (0005), casefile pipeline (0006), Temporal casefile execution (0007), model-driven agents on Strands (0008), bounded swarm & approval-gated tools (0009), and observability + provider-contract pinning (0010).
+See [`decisions/`](decisions/): Temporal control plane (0001), provider-neutral adapters (0002), model gateway (0003), Strands/Temporal harness runtime (0004), tool policy & approvals (0005), casefile pipeline (0006), Temporal casefile execution (0007), model-driven agents on Strands (0008), bounded swarm & approval-gated tools (0009), observability + provider-contract pinning (0010), and roadmap hardening + test evidence (0011).
 </content>

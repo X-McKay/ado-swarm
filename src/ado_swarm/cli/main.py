@@ -3,15 +3,14 @@ from __future__ import annotations
 import asyncio
 import json
 from pathlib import Path
-from uuid import uuid4
 
 import typer
 
 from ado_swarm.agents.registry import list_agent_metadata
 from ado_swarm.config import get_settings
 from ado_swarm.knowledge.graphiti_store import KnowledgeStore
+from ado_swarm.runtime.mission_service import MissionService
 from ado_swarm.storage.artifacts import PostgresArtifactStore
-from ado_swarm.temporal.client import build_temporal_client
 from ado_swarm.tools.source_providers.factory import build_source_provider
 
 app = typer.Typer(no_args_is_help=True)
@@ -83,16 +82,7 @@ def eval_swarm(model_profile: str = "fake") -> None:
 @app.command("start-mission")
 def start_mission(goal: str) -> None:
     async def _run() -> dict:
-        settings = get_settings()
-        run_id = str(uuid4())
-        client = await build_temporal_client(settings)
-        handle = await client.start_workflow(
-            "SupervisorWorkflow",
-            args=[run_id, goal],
-            id=f"mission:{run_id}",
-            task_queue=settings.temporal_task_queue,
-        )
-        return {"run_id": run_id, "workflow_id": handle.id, "status": "started"}
+        return await MissionService(get_settings()).start(goal)
 
     typer.echo(json.dumps(asyncio.run(_run()), indent=2))
 
@@ -100,10 +90,7 @@ def start_mission(goal: str) -> None:
 @runs_app.command("describe")
 def describe_run(workflow_id: str) -> None:
     async def _run() -> dict:
-        client = await build_temporal_client()
-        handle = client.get_workflow_handle(workflow_id)
-        snapshot = await handle.query("get_snapshot")
-        return snapshot.model_dump(mode="json") if hasattr(snapshot, "model_dump") else snapshot
+        return await MissionService().describe(workflow_id)
 
     typer.echo(json.dumps(asyncio.run(_run()), indent=2))
 
@@ -120,10 +107,7 @@ def run_artifacts(run_id: str) -> None:
 @runs_app.command("pause")
 def pause_run(workflow_id: str, reason: str = "manual pause") -> None:
     async def _run() -> dict:
-        client = await build_temporal_client()
-        handle = client.get_workflow_handle(workflow_id)
-        await handle.signal("pause", reason)
-        return {"workflow_id": workflow_id, "status": "pause_signal_sent"}
+        return await MissionService().pause(workflow_id, reason)
 
     typer.echo(json.dumps(asyncio.run(_run()), indent=2))
 
@@ -131,10 +115,7 @@ def pause_run(workflow_id: str, reason: str = "manual pause") -> None:
 @runs_app.command("resume")
 def resume_run(workflow_id: str) -> None:
     async def _run() -> dict:
-        client = await build_temporal_client()
-        handle = client.get_workflow_handle(workflow_id)
-        await handle.signal("resume")
-        return {"workflow_id": workflow_id, "status": "resume_signal_sent"}
+        return await MissionService().resume(workflow_id)
 
     typer.echo(json.dumps(asyncio.run(_run()), indent=2))
 
@@ -225,11 +206,16 @@ def skills_lint() -> None:
 
 @scaffold_app.command("agent")
 def scaffold_agent_cmd(
-    agent_id: str, section_field: str = "TODO_section", tool: str = "TODO_tool"
+    agent_id: str,
+    section_field: str = "readiness",
+    tool: str = "assess_readiness",
+    section_model: str = "ReadinessVerdict",
 ) -> None:
     from ado_swarm.cli.scaffold import scaffold_agent
 
-    created = scaffold_agent(agent_id, section_field=section_field, tool=tool)
+    created = scaffold_agent(
+        agent_id, section_field=section_field, tool=tool, section_model=section_model
+    )
     for path in created:
         typer.echo(f"created {path}")
 
@@ -242,7 +228,9 @@ def scaffold_tool_cmd(name: str, area: str) -> None:
 
 
 @scaffold_app.command("skill")
-def scaffold_skill_cmd(name: str, description: str = "TODO: when to use this skill") -> None:
+def scaffold_skill_cmd(
+    name: str, description: str = "Use this skill for repository-specific work"
+) -> None:
     from ado_swarm.cli.scaffold import scaffold_skill
 
     typer.echo(f"created {scaffold_skill(name, description)}")
